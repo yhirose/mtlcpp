@@ -32,6 +32,20 @@ TEST_CASE("testing initializer") {
   CHECK(a.length() == 4);
 }
 
+TEST_CASE("testing with container") {
+  std::vector<int> v{1, 2, 3, 4};
+  Array<int> a{v};
+  CHECK(a.length() == 4);
+
+  Array<int> b{std::vector<int>{1, 2, 3, 4}};
+  CHECK(b.length() == 4);
+}
+
+TEST_CASE("testing with ranges") {
+  Array<int> a{std::views::iota(1) | std::views::take(10)};
+  CHECK(a.length() == 10);
+}
+
 TEST_CASE("testing copy operator") {
   auto a = ones<float>(8);
   auto b = a;
@@ -49,8 +63,13 @@ TEST_CASE("testing assignment operator") {
     a[i] = 1;
   }
   CHECK(ones<float>(8) == a);
+}
 
-  // TODO:: range check...
+TEST_CASE("testing bounds check") {
+  Array<int> a{std::views::iota(0) | std::views::take(10)};
+  CHECK(a[9] == 9);
+  CHECK_THROWS_WITH_AS(a[10], "array: Index is out of bounds.",
+                       std::runtime_error);
 }
 
 TEST_CASE("testing range-for") {

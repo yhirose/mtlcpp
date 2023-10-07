@@ -1,10 +1,5 @@
 #pragma once
 
-#include <cstdlib>
-#include <iostream>
-#include <memory>
-#include <sstream>
-
 namespace mtlcpp {
 
 enum class ComputeType {

@@ -2,28 +2,42 @@
 
 #include <gpu.h>
 
+#include <iterator>
+#include <ranges>
+#include <sstream>
+#include <iostream>
+
 namespace mtlcpp {
 
 template <typename T, typename Backend = GPU>
 class Array {
  private:
   size_t length_;
-  typename Backend::Memory buf_;
+  Backend::Memory buf_;
 
  public:
   Array(const Array &rhs) = default;
   Array(Array &&rhs) = default;
   Array &operator=(const Array &rhs) = default;
 
+  // This constructor is needed to avoid `std::ranges::input_range`
+  Array(Array &rhs) {
+    length_ = rhs.length_;
+    buf_ = rhs.buf_;
+  }
+
   Array(size_t length) : length_(length) {
-    auto buf_length = sizeof(T) * length;
-    buf_ = Backend::allocate(buf_length);
+    buf_ = Backend::allocate(buf_length());
   }
 
   Array(std::initializer_list<T> l) : length_(l.size()) {
-    auto buf_length = sizeof(T) * length_;
-    buf_ = Backend::allocate(buf_length);
-    std::copy(l.begin(), l.end(), data());
+    buf_ = Backend::allocate(buf_length());
+    std::ranges::copy(l, data());
+  }
+
+  Array(std::ranges::input_range auto &&r) : length_(std::ranges::distance(r)) {
+    buf_ = Backend::allocate(buf_length());
+    std::ranges::copy(r, data());
   }
 
   Array copy() const {
@@ -81,7 +95,7 @@ class Array {
   }
 
   void constants(T val) {
-    for (auto& x: *this) {
+    for (auto &x : *this) {
       x = val;
     }
   }
@@ -91,12 +105,14 @@ class Array {
   void ones() { constants(1); };
 
   void random() {
-    for (auto& x: *this) {
+    for (auto &x : *this) {
       x = static_cast<T>(rand()) / static_cast<T>(RAND_MAX);
     }
   }
 
  private:
+  size_t buf_length() const { return sizeof(T) * length_; }
+
   Array compute(const Array &rhs, ComputeType id) const {
     if (length() != rhs.length()) {
       std::stringstream ss;

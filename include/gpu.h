@@ -2,6 +2,9 @@
 
 #include <common.h>
 
+#include <cstdlib>
+#include <memory>
+
 namespace mtlcpp {
 
 struct GPU {
