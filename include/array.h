@@ -65,12 +65,12 @@ class Array {
   const T *data() const { return static_cast<const T *>(buf_.data()); }
 
   T operator[](size_t i) const {
-    // TODO: range check...
+    bounds_check(i);
     return data()[i];
   }
 
   T &operator[](size_t i) {
-    // TODO: check range...
+    bounds_check(i);
     return data()[i];
   }
 
@@ -123,6 +123,14 @@ class Array {
     Array tmp(length_);
     Backend::compute(buf_, rhs.buf_, tmp.buf_, id, sizeof(T));
     return tmp;
+  }
+
+  void bounds_check(size_t i) const {
+    if (i >= length_) {
+      std::stringstream ss;
+      ss << "array: Index is out of bounds.";
+      throw std::runtime_error(ss.str());
+    }
   }
 };
 
