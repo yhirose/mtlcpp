@@ -6,16 +6,17 @@ CXXFLAGS = -std=c++20 -O2 -I$(METAL_CPP_DIR) -I../include -framework Foundation 
 INC = ../include/metal.h ../include/gpu.h ../include/array.h
 SRC = ../src/metal.cpp ../src/gpu.cpp
 
+TEST_INC = utils.h
 TEST_SRC = test_metal.cpp test_gpu.cpp test_array.cpp test.cpp
 
 BENCH_SRC = bench.cpp
 
 all : test bench
 
-test : $(SRC) $(INC) $(TEST_SRC) Makefile
+test : $(INC) $(SRC) $(TEST_INC) $(TEST_SRC) Makefile
 	$(CXX) -o $@ $(CXXFLAGS) $(SRC) $(TEST_SRC)
 
-bench : $(SRC) $(INC) $(BENCH_SRC) Makefile
+bench : $(INC) $(SRC) $(BENCH_SRC) Makefile
 	$(CXX) -o $@ $(CXXFLAGS) $(SRC) $(BENCH_SRC)
 
 clean:

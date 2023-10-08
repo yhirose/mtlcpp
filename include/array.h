@@ -20,11 +20,25 @@ class Array {
   Array(Array &&rhs) = default;
   Array &operator=(const Array &rhs) = default;
 
-  // This constructor is needed to avoid `std::ranges::input_range`
+  // This constructor is to avoid incorrect `std::ranges::input_range` usage
   Array(Array &rhs) {
     length_ = rhs.length_;
     buf_ = rhs.buf_;
   }
+
+  bool operator==(const Array &rhs) const {
+    if (this != &rhs) {
+      if (length() != rhs.length()) {
+        return false;
+      }
+      return memcmp(buf_.data(), rhs.buf_.data(), buf_.length()) == 0;
+    }
+    return true;
+  }
+
+  bool operator!=(const Array &rhs) const { return !this->operator==(rhs); }
+
+  //----------------------------------------------------------------------------
 
   Array(size_t length) : length_(length) {
     buf_ = Backend::allocate(buf_length());
@@ -47,20 +61,6 @@ class Array {
     memcpy(tmp.buf_.data(), buf_.data(), buf_.length());
     return tmp;
   }
-
-  //----------------------------------------------------------------------------
-
-  bool operator==(const Array &rhs) const {
-    if (this != &rhs) {
-      if (length() != rhs.length()) {
-        return false;
-      }
-      return memcmp(buf_.data(), rhs.buf_.data(), buf_.length()) == 0;
-    }
-    return true;
-  }
-
-  bool operator!=(const Array &rhs) const { return !this->operator==(rhs); }
 
   //----------------------------------------------------------------------------
 

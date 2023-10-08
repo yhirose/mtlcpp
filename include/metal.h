@@ -36,8 +36,8 @@ class metal {
 
   managed_ptr<MTL::Buffer> newBuffer(NS::UInteger length);
 
-  void compute(MTL::Buffer* A, MTL::Buffer* B, MTL::Buffer* OUT,
-               ComputeType id, size_t element_size);
+  void compute(MTL::Buffer* A, MTL::Buffer* B, MTL::Buffer* OUT, ComputeType id,
+               size_t element_size);
 
  private:
   MTL::Device* device_;

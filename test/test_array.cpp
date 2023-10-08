@@ -1,17 +1,24 @@
 #include <array.h>
 
 #include "doctest.h"
+#include "utils.h"
 
 using namespace mtlcpp;
 
 template <typename T, typename U>
 bool verify(const Array<T> &A, const Array<T> &B, const Array<T> &OUT, U fn) {
-  for (size_t i = 0; i < A.length(); i++) {
-    if (OUT[i] != fn(A[i], B[i])) {
-      return false;
-    }
-  }
-  return true;
+  return verify(A.data(), B.data(), OUT.data(), A.length(), fn);
+}
+
+template <typename T, typename U>
+bool verify_tolerant(const Array<T> &A, const Array<T> &B, const Array<T> &OUT,
+                     U fn) {
+  return verify_tolerant(A.data(), B.data(), OUT.data(), A.length(), fn);
+}
+
+TEST_CASE("testing size of Array object") {
+  Array<int> a{1, 2, 3, 4};
+  CHECK(sizeof(a) == 24);
 }
 
 TEST_CASE("testing length") {
@@ -80,7 +87,7 @@ TEST_CASE("testing range-for") {
   CHECK(ones<float>(8) == a);
 }
 
-TEST_CASE("testing arithmatic operations") {
+TEST_CASE("testing arithmatic binary operations") {
   constexpr size_t kLength = 16;
 
   auto a = random<float>(kLength);
@@ -102,9 +109,9 @@ TEST_CASE("testing arithmatic operations") {
   CHECK(verify<float>(a, b, out, [](auto a, auto b) { return a * b; }));
 
   out = a / b;
-  // TODO:
-  // CHECK(out.length() == kLength);
-  // CHECK(verify<float>(a, b, out, [](auto a, auto b) { return a / b; }));
+  CHECK(out.length() == kLength);
+  CHECK(
+      verify_tolerant<float>(a, b, out, [](auto a, auto b) { return a / b; }));
 }
 
 TEST_CASE("testing arithmatic binary operation errors") {

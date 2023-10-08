@@ -1,6 +1,7 @@
 #include <metal.h>
 
 #include "doctest.h"
+#include "utils.h"
 
 using namespace mtlcpp;
 
@@ -8,26 +9,25 @@ template <typename T, typename U>
 bool verify(const mtl::managed_ptr<MTL::Buffer> &A,
             const mtl::managed_ptr<MTL::Buffer> &B,
             const mtl::managed_ptr<MTL::Buffer> &OUT, U fn) {
-  auto a = static_cast<T *>(A->contents());
-  auto b = static_cast<T *>(B->contents());
-  auto out = static_cast<T *>(OUT->contents());
+  return verify(static_cast<T *>(A->contents()),
+                static_cast<T *>(B->contents()),
+                static_cast<T *>(OUT->contents()), A->length() / sizeof(T), fn);
+}
 
-  auto arr_len = A->length() / sizeof(T);
-  for (size_t i = 0; i < arr_len; i++) {
-    if (out[i] != fn(a[i], b[i])) {
-      return false;
-    }
-  }
-  return true;
+template <typename T, typename U>
+bool verify_tolerant(const mtl::managed_ptr<MTL::Buffer> &A,
+                     const mtl::managed_ptr<MTL::Buffer> &B,
+                     const mtl::managed_ptr<MTL::Buffer> &OUT, U fn) {
+  return verify_tolerant(
+      static_cast<T *>(A->contents()), static_cast<T *>(B->contents()),
+      static_cast<T *>(OUT->contents()), A->length() / sizeof(T), fn);
 }
 
 template <typename T>
 void random(mtl::managed_ptr<MTL::Buffer> &buf) {
   auto p = static_cast<T *>(buf->contents());
   auto arr_len = buf->length() / sizeof(T);
-  for (size_t i = 0; i < arr_len; i++) {
-    p[i] = static_cast<T>(rand()) / static_cast<T>(RAND_MAX);
-  }
+  random(p, arr_len);
 }
 
 TEST_CASE("testing basic operations") {
@@ -58,6 +58,6 @@ TEST_CASE("testing basic operations") {
 
   metal.compute(A.get(), B.get(), OUT.get(), ComputeType::ARRAY_DIV_F,
                 sizeof(float));
-  // TODO:
-  // CHECK(verify<float>(A, B, OUT, [](auto a, auto b) { return a / b; }));
+  CHECK(
+      verify_tolerant<float>(A, B, OUT, [](auto a, auto b) { return a / b; }));
 }

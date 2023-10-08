@@ -4,10 +4,10 @@
 
 namespace mtlcpp {
 
-mtl::metal &mltcpp() {
+static mtl::metal &metal() {
   static auto device_ = mtl::managed(MTL::CreateSystemDefaultDevice());
-  static auto mltcpp_ = mtl::metal(device_.get());
-  return mltcpp_;
+  static auto metal_ = mtl::metal(device_.get());
+  return metal_;
 }
 
 class GPU::MemoryImpl {
@@ -30,13 +30,13 @@ size_t GPU::Memory::length() const { return impl_->length(); }
 
 GPU::Memory GPU::allocate(size_t buf_len) {
   Memory buf;
-  buf.impl_->buf_ = mltcpp().newBuffer(buf_len);
+  buf.impl_->buf_ = metal().newBuffer(buf_len);
   return buf;
 }
 
 void GPU::compute(const GPU::Memory &A, const GPU::Memory &B, const GPU::Memory &OUT,
                   ComputeType id, size_t element_size) {
-  mltcpp().compute(A.impl_->buf_.get(), B.impl_->buf_.get(),
+  metal().compute(A.impl_->buf_.get(), B.impl_->buf_.get(),
                    OUT.impl_->buf_.get(), id, element_size);
 }
 
