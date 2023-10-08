@@ -107,10 +107,18 @@ TEST_CASE("testing arithmatic operations") {
   // CHECK(verify<float>(a, b, out, [](auto a, auto b) { return a / b; }));
 }
 
-TEST_CASE("testing arithmatic operation errors") {
+TEST_CASE("testing arithmatic binary operation errors") {
   auto a = random<float>(4);
   auto b = random<float>(8);
   CHECK(a != b);
 
   CHECK_THROWS_WITH_AS(a + b, "array: Invalid operation.", std::runtime_error);
+}
+
+TEST_CASE("testing arithmatic operations") {
+  Array<int> a{1, 2, 3, 4, 5, 6};
+  CHECK(a.sum() == 21);
+
+  CHECK(a.mean() == 3);
+  CHECK(a.mean<double>() == 3.5);
 }
