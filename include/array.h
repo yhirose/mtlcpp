@@ -1,6 +1,6 @@
 #pragma once
 
-#include <gpu.h>
+#include <metal.h>
 
 #include <concepts>
 #include <iterator>
@@ -14,11 +14,11 @@ template <typename T>
 concept ElementType = std::is_same_v<T, float> || std::is_same_v<T, int> ||
                       std::is_same_v<T, unsigned int>;
 
-template <ElementType T, typename Backend = GPU>
+template <ElementType T>
 class Array {
  private:
   size_t length_;
-  Backend::Memory buf_;
+  mtl::managed_ptr<MTL::Buffer> buf_;
 
  public:
   Array(const Array &rhs) = default;
@@ -36,7 +36,8 @@ class Array {
       if (length() != rhs.length()) {
         return false;
       }
-      return memcmp(buf_.data(), rhs.buf_.data(), buf_.length()) == 0;
+      return memcmp(buf_->contents(), rhs.buf_->contents(), buf_->length()) ==
+             0;
     }
     return true;
   }
@@ -46,16 +47,16 @@ class Array {
   //----------------------------------------------------------------------------
 
   Array(size_t length) : length_(length) {
-    buf_ = Backend::allocate(buf_length());
+    buf_ = mtl::newBuffer(buf_length());
   }
 
   Array(std::initializer_list<T> l) : length_(l.size()) {
-    buf_ = Backend::allocate(buf_length());
+    buf_ = mtl::newBuffer(buf_length());
     std::ranges::copy(l, data());
   }
 
   Array(std::ranges::input_range auto &&r) : length_(std::ranges::distance(r)) {
-    buf_ = Backend::allocate(buf_length());
+    buf_ = mtl::newBuffer(buf_length());
     std::ranges::copy(r, data());
   }
 
@@ -63,7 +64,7 @@ class Array {
 
   Array copy() const {
     Array tmp(length_);
-    memcpy(tmp.buf_.data(), buf_.data(), buf_.length());
+    memcpy(tmp.buf_->contents(), buf_->contents(), buf_->length());
     return tmp;
   }
 
@@ -73,9 +74,9 @@ class Array {
 
   //----------------------------------------------------------------------------
 
-  T *data() { return static_cast<T *>(buf_.data()); }
+  T *data() { return static_cast<T *>(buf_->contents()); }
 
-  const T *data() const { return static_cast<const T *>(buf_.data()); }
+  const T *data() const { return static_cast<const T *>(buf_->contents()); }
 
   //----------------------------------------------------------------------------
 
@@ -113,7 +114,9 @@ class Array {
 
   void random(size_t times = 1, T bias = 0) {
     for (auto &x : *this) {
-      x = (static_cast<double>(rand()) / static_cast<double>(RAND_MAX)) * times + bias;
+      x = (static_cast<double>(rand()) / static_cast<double>(RAND_MAX)) *
+              times +
+          bias;
     }
   }
 
@@ -121,41 +124,41 @@ class Array {
 
   Array operator+(const Array &rhs) const {
     if constexpr (std::is_same_v<T, float>) {
-      return compute(rhs, ComputeType::ARRAY_ADD_F);
+      return compute(rhs, mtl::ComputeType::ARRAY_ADD_F);
     } else if constexpr (std::is_same_v<T, int>) {
-      return compute(rhs, ComputeType::ARRAY_ADD_I);
+      return compute(rhs, mtl::ComputeType::ARRAY_ADD_I);
     } else {
-      return compute(rhs, ComputeType::ARRAY_ADD_U);
+      return compute(rhs, mtl::ComputeType::ARRAY_ADD_U);
     }
   }
 
   Array operator-(const Array &rhs) const {
     if constexpr (std::is_same_v<T, float>) {
-      return compute(rhs, ComputeType::ARRAY_SUB_F);
+      return compute(rhs, mtl::ComputeType::ARRAY_SUB_F);
     } else if constexpr (std::is_same_v<T, int>) {
-      return compute(rhs, ComputeType::ARRAY_SUB_I);
+      return compute(rhs, mtl::ComputeType::ARRAY_SUB_I);
     } else {
-      return compute(rhs, ComputeType::ARRAY_SUB_U);
+      return compute(rhs, mtl::ComputeType::ARRAY_SUB_U);
     }
   }
 
   Array operator*(const Array &rhs) const {
     if constexpr (std::is_same_v<T, float>) {
-      return compute(rhs, ComputeType::ARRAY_MUL_F);
+      return compute(rhs, mtl::ComputeType::ARRAY_MUL_F);
     } else if constexpr (std::is_same_v<T, int>) {
-      return compute(rhs, ComputeType::ARRAY_MUL_I);
+      return compute(rhs, mtl::ComputeType::ARRAY_MUL_I);
     } else {
-      return compute(rhs, ComputeType::ARRAY_MUL_U);
+      return compute(rhs, mtl::ComputeType::ARRAY_MUL_U);
     }
   }
 
   Array operator/(const Array &rhs) const {
     if constexpr (std::is_same_v<T, float>) {
-      return compute(rhs, ComputeType::ARRAY_DIV_F);
+      return compute(rhs, mtl::ComputeType::ARRAY_DIV_F);
     } else if constexpr (std::is_same_v<T, int>) {
-      return compute(rhs, ComputeType::ARRAY_DIV_I);
+      return compute(rhs, mtl::ComputeType::ARRAY_DIV_I);
     } else {
-      return compute(rhs, ComputeType::ARRAY_DIV_U);
+      return compute(rhs, mtl::ComputeType::ARRAY_DIV_U);
     }
   }
 
@@ -171,7 +174,7 @@ class Array {
  private:
   auto buf_length() const { return sizeof(T) * length_; }
 
-  auto compute(const Array &rhs, ComputeType id) const {
+  auto compute(const Array &rhs, mtl::ComputeType id) const {
     if (length() != rhs.length()) {
       std::stringstream ss;
       ss << "array: Invalid operation.";
@@ -179,7 +182,7 @@ class Array {
     }
 
     Array tmp(length_);
-    Backend::compute(buf_, rhs.buf_, tmp.buf_, id, sizeof(T));
+    mtl::compute(buf_.get(), rhs.buf_.get(), tmp.buf_.get(), id, sizeof(T));
     return tmp;
   }
 

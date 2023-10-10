@@ -24,10 +24,3 @@ bool verify_tolerant(const T* A, const T* B, const T* OUT, size_t length, U fn) 
     return ratio < 0.001;
   }
 }
-
-template <typename T>
-void random(T* p, size_t length) {
-  for (size_t i = 0; i < length; i++) {
-    p[i] = static_cast<T>(rand()) / static_cast<T>(RAND_MAX);
-  }
-}

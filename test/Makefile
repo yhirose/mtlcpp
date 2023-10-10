@@ -3,21 +3,20 @@ METAL_CPP_DIR = ../metal-cpp_macOS13.3_iOS16.4
 CXX = clang++
 CXXFLAGS = -std=c++20 -O2 -I$(METAL_CPP_DIR) -I../include -framework Foundation -framework Metal -framework MetalKit
 
-INC = ../include/metal.h ../include/gpu.h ../include/array.h
-SRC = ../src/metal.cpp ../src/gpu.cpp
+INC = ../include/metal.h ../include/array.h
 
 TEST_INC = utils.h
-TEST_SRC = test_metal.cpp test_gpu.cpp test_array.cpp test.cpp
+TEST_SRC = test_metal.cpp test_array.cpp test.cpp
 
 BENCH_SRC = bench.cpp
 
 all : test bench
 
-test : $(INC) $(SRC) $(TEST_INC) $(TEST_SRC) Makefile
-	$(CXX) -o $@ $(CXXFLAGS) $(SRC) $(TEST_SRC)
+test : $(INC) $(TEST_INC) $(TEST_SRC) Makefile
+	$(CXX) -o $@ $(CXXFLAGS) $(TEST_SRC)
 
-bench : $(INC) $(SRC) $(BENCH_SRC) Makefile
-	$(CXX) -o $@ $(CXXFLAGS) $(SRC) $(BENCH_SRC)
+bench : $(INC) $(BENCH_SRC) Makefile
+	$(CXX) -o $@ $(CXXFLAGS) $(BENCH_SRC)
 
 clean:
 	rm -rf test bench

@@ -1,6 +1,6 @@
+#define NS_PRIVATE_IMPLEMENTATION
+#define MTL_PRIVATE_IMPLEMENTATION
 #include <array.h>
-// #include <gpu.h>
-// #include <metal.h>
 
 #define ANKERL_NANOBENCH_IMPLEMENT
 #include "nanobench.h"
@@ -19,17 +19,19 @@ void bench_comparison_between_gpu_and_cpu() {
   size_t epochs = 10;
   const size_t length = 60 * 180 * 10000;
 
-  auto a = GPU::allocate<float>(length);
-  auto b = GPU::allocate<float>(length);
-  auto out = GPU::allocate<float>(length);
+  auto a = mtl::newBuffer(sizeof(float) * length);
+  auto b = mtl::newBuffer(sizeof(float) * length);
+  auto out = mtl::newBuffer(sizeof(float) * length);
 
   Bench().epochs(epochs).run("GPU add", [&] {
-    GPU::compute(a, b, out, ComputeType::ARRAY_ADD_F, sizeof(float));
+    mtl::compute(a.get(), b.get(), out.get(), mtl::ComputeType::ARRAY_ADD_F,
+                 sizeof(float));
   });
 
   Bench().epochs(epochs).run("CPU add", [&] {
-    array_add_f_cpu(a.data<float>(), b.data<float>(), out.data<float>(),
-                    length);
+    array_add_f_cpu<float>(static_cast<float *>(a->contents()),
+                           static_cast<float *>(b->contents()),
+                           static_cast<float *>(out->contents()), length);
   });
 }
 
@@ -41,17 +43,9 @@ void bench_array_operations() {
   auto b = random<float>(length);
   auto out = random<float>(length);
 
-  Bench().epochs(epochs).run("ones", [&] {
-      ones<float>(length);
-  });
-
-  Bench().epochs(epochs).run("random", [&] {
-      random<float>(length);
-  });
-
-  Bench().epochs(epochs).run("a + b", [&] {
-      a + b;
-  });
+  Bench().epochs(epochs).run("ones", [&] { ones<float>(length); });
+  Bench().epochs(epochs).run("random", [&] { random<float>(length); });
+  Bench().epochs(epochs).run("a + b", [&] { a + b; });
 }
 
 int main(void) {
