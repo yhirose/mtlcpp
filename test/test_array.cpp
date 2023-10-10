@@ -21,17 +21,19 @@ TEST_CASE("testing size of Array object") {
   CHECK(sizeof(a) == 24);
 }
 
+#include <iostream>
+
 TEST_CASE("testing length") {
   constexpr size_t arr_len = 8;
-
-  auto u32 = random<uint32_t>(arr_len);
-  CHECK(u32.length() == arr_len);
 
   auto f = random<float>(arr_len);
   CHECK(f.length() == arr_len);
 
-  auto d = random<double>(arr_len);
-  CHECK(d.length() == arr_len);
+  auto i = random<int>(arr_len, 100);
+  CHECK(i.length() == arr_len);
+
+  auto u = random<uint32_t>(arr_len, 100);
+  CHECK(u.length() == arr_len);
 }
 
 TEST_CASE("testing initializer") {

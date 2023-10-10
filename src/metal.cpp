@@ -49,6 +49,78 @@ kernel void array_div_f(
   OUT[index] = A[index] / B[index];
 }
 
+kernel void array_add_i(
+  device const int* A,
+  device const int* B,
+  device int* OUT,
+  uint index [[thread_position_in_grid]])
+{
+  OUT[index] = A[index] + B[index];
+}
+
+kernel void array_sub_i(
+  device const int* A,
+  device const int* B,
+  device int* OUT,
+  uint index [[thread_position_in_grid]])
+{
+  OUT[index] = A[index] - B[index];
+}
+
+kernel void array_mul_i(
+  device const int* A,
+  device const int* B,
+  device int* OUT,
+  uint index [[thread_position_in_grid]])
+{
+  OUT[index] = A[index] * B[index];
+}
+
+kernel void array_div_i(
+  device const int* A,
+  device const int* B,
+  device int* OUT,
+  uint index [[thread_position_in_grid]])
+{
+  OUT[index] = A[index] / B[index];
+}
+
+kernel void array_add_u(
+  device const unsigned int* A,
+  device const unsigned int* B,
+  device unsigned int* OUT,
+  uint index [[thread_position_in_grid]])
+{
+  OUT[index] = A[index] + B[index];
+}
+
+kernel void array_sub_u(
+  device const unsigned int* A,
+  device const unsigned int* B,
+  device unsigned int* OUT,
+  uint index [[thread_position_in_grid]])
+{
+  OUT[index] = A[index] - B[index];
+}
+
+kernel void array_mul_u(
+  device const unsigned int* A,
+  device const unsigned int* B,
+  device unsigned int* OUT,
+  uint index [[thread_position_in_grid]])
+{
+  OUT[index] = A[index] * B[index];
+}
+
+kernel void array_div_u(
+  device const unsigned int* A,
+  device const unsigned int* B,
+  device unsigned int* OUT,
+  uint index [[thread_position_in_grid]])
+{
+  OUT[index] = A[index] / B[index];
+}
+
 )";
 
 //-----------------------------------------------------------------------------
@@ -78,6 +150,14 @@ metal::metal(MTL::Device *device) : device_(device) {
   create_compute_pipeline_state_object_(device, lib, "array_sub_f");
   create_compute_pipeline_state_object_(device, lib, "array_mul_f");
   create_compute_pipeline_state_object_(device, lib, "array_div_f");
+  create_compute_pipeline_state_object_(device, lib, "array_add_i");
+  create_compute_pipeline_state_object_(device, lib, "array_sub_i");
+  create_compute_pipeline_state_object_(device, lib, "array_mul_i");
+  create_compute_pipeline_state_object_(device, lib, "array_div_i");
+  create_compute_pipeline_state_object_(device, lib, "array_add_u");
+  create_compute_pipeline_state_object_(device, lib, "array_sub_u");
+  create_compute_pipeline_state_object_(device, lib, "array_mul_u");
+  create_compute_pipeline_state_object_(device, lib, "array_div_u");
 
   // Create a command queue
   queue_ = managed(device->newCommandQueue());

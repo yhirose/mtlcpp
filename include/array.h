@@ -2,6 +2,7 @@
 
 #include <gpu.h>
 
+#include <concepts>
 #include <iterator>
 #include <numeric>
 #include <ranges>
@@ -9,7 +10,11 @@
 
 namespace mtlcpp {
 
-template <typename T, typename Backend = GPU>
+template <typename T>
+concept ElementType = std::is_same_v<T, float> || std::is_same_v<T, int> ||
+                      std::is_same_v<T, unsigned int>;
+
+template <ElementType T, typename Backend = GPU>
 class Array {
  private:
   size_t length_;
@@ -106,28 +111,52 @@ class Array {
 
   void ones() { constants(1); };
 
-  void random() {
+  void random(size_t times = 1, T bias = 0) {
     for (auto &x : *this) {
-      x = static_cast<T>(rand()) / static_cast<T>(RAND_MAX);
+      x = (static_cast<double>(rand()) / static_cast<double>(RAND_MAX)) * times + bias;
     }
   }
 
   //----------------------------------------------------------------------------
 
   Array operator+(const Array &rhs) const {
-    return compute(rhs, ComputeType::ARRAY_ADD_F);
+    if constexpr (std::is_same_v<T, float>) {
+      return compute(rhs, ComputeType::ARRAY_ADD_F);
+    } else if constexpr (std::is_same_v<T, int>) {
+      return compute(rhs, ComputeType::ARRAY_ADD_I);
+    } else {
+      return compute(rhs, ComputeType::ARRAY_ADD_U);
+    }
   }
 
   Array operator-(const Array &rhs) const {
-    return compute(rhs, ComputeType::ARRAY_SUB_F);
+    if constexpr (std::is_same_v<T, float>) {
+      return compute(rhs, ComputeType::ARRAY_SUB_F);
+    } else if constexpr (std::is_same_v<T, int>) {
+      return compute(rhs, ComputeType::ARRAY_SUB_I);
+    } else {
+      return compute(rhs, ComputeType::ARRAY_SUB_U);
+    }
   }
 
   Array operator*(const Array &rhs) const {
-    return compute(rhs, ComputeType::ARRAY_MUL_F);
+    if constexpr (std::is_same_v<T, float>) {
+      return compute(rhs, ComputeType::ARRAY_MUL_F);
+    } else if constexpr (std::is_same_v<T, int>) {
+      return compute(rhs, ComputeType::ARRAY_MUL_I);
+    } else {
+      return compute(rhs, ComputeType::ARRAY_MUL_U);
+    }
   }
 
   Array operator/(const Array &rhs) const {
-    return compute(rhs, ComputeType::ARRAY_DIV_F);
+    if constexpr (std::is_same_v<T, float>) {
+      return compute(rhs, ComputeType::ARRAY_DIV_F);
+    } else if constexpr (std::is_same_v<T, int>) {
+      return compute(rhs, ComputeType::ARRAY_DIV_I);
+    } else {
+      return compute(rhs, ComputeType::ARRAY_DIV_U);
+    }
   }
 
   //----------------------------------------------------------------------------
@@ -166,9 +195,9 @@ class Array {
 //------------------------------------------------------------------------------
 
 template <typename T>
-inline auto random(size_t length) {
+inline auto random(size_t length, size_t times = 1, T bias = 0) {
   Array<T> arr(length);
-  arr.random();
+  arr.random(times, bias);
   return arr;
 }
 
