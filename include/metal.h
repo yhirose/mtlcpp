@@ -3,7 +3,7 @@
 #include <Metal/Metal.hpp>
 #include <sstream>
 
-namespace mtlcpp::mtl {
+namespace mtl {
 
 //-----------------------------------------------------------------------------
 
@@ -298,5 +298,5 @@ inline void compute(MTL::Buffer* A, MTL::Buffer* B, MTL::Buffer* OUT,
   return singleton_instance_().compute(A, B, OUT, id, element_size);
 }
 
-};  // namespace mtlcpp::mtl
+};  // namespace mtl
 

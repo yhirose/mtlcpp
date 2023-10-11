@@ -10,7 +10,8 @@ bool verify(const T* A, const T* B, const T* OUT, size_t length, U fn) {
 }
 
 template <typename T, typename U>
-bool verify_tolerant(const T* A, const T* B, const T* OUT, size_t length, U fn) {
+bool verify_tolerant(const T* A, const T* B, const T* OUT, size_t length,
+                     U fn) {
   size_t err = 0;
   for (size_t i = 0; i < length; i++) {
     if (std::abs(OUT[i] - fn(A[i], B[i])) > 1e-3) {

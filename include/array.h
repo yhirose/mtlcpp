@@ -8,69 +8,74 @@
 #include <ranges>
 #include <sstream>
 
-namespace mtlcpp {
+namespace mtl {
 
 template <typename T>
-concept ElementType = std::is_same_v<T, float> || std::is_same_v<T, int> ||
-                      std::is_same_v<T, unsigned int>;
+concept value_type = std::is_same_v<T, float> || std::is_same_v<T, int> ||
+                     std::is_same_v<T, unsigned int>;
 
-template <ElementType T>
-class Array {
- private:
-  size_t length_;
-  mtl::managed_ptr<MTL::Buffer> buf_;
+using shape_type = std::vector<size_t>;
 
+template <value_type T>
+class array {
  public:
-  Array(const Array &rhs) = default;
-  Array(Array &&rhs) = default;
-  Array &operator=(const Array &rhs) = default;
-
-  // This constructor is to avoid incorrect `std::ranges::input_range` usage
-  Array(Array &rhs) {
-    length_ = rhs.length_;
-    buf_ = rhs.buf_;
-  }
-
-  bool operator==(const Array &rhs) const {
-    if (this != &rhs) {
-      if (length() != rhs.length()) {
-        return false;
-      }
-      return memcmp(buf_->contents(), rhs.buf_->contents(), buf_->length()) ==
-             0;
-    }
-    return true;
-  }
-
-  bool operator!=(const Array &rhs) const { return !this->operator==(rhs); }
+  array(array &&rhs) = default;
+  array(const array &rhs) = default;             // TODO: use GPU
+  array &operator=(const array &rhs) = default;  // TODO: use GPU
+                                                 //
+  array(const shape_type &shape) : shape_(shape) { allocate_buffer_(); }
 
   //----------------------------------------------------------------------------
 
-  Array(size_t length) : length_(length) {
-    buf_ = mtl::newBuffer(buf_length());
-  }
-
-  Array(std::initializer_list<T> l) : length_(l.size()) {
-    buf_ = mtl::newBuffer(buf_length());
-    std::ranges::copy(l, data());
-  }
-
-  Array(std::ranges::input_range auto &&r) : length_(std::ranges::distance(r)) {
-    buf_ = mtl::newBuffer(buf_length());
-    std::ranges::copy(r, data());
-  }
-
-  //----------------------------------------------------------------------------
-
-  Array copy() const {
-    Array tmp(length_);
+  array clone() const {
+    array tmp(shape_);
+    // TODO: use GPU
     memcpy(tmp.buf_->contents(), buf_->contents(), buf_->length());
     return tmp;
   }
 
   //----------------------------------------------------------------------------
 
-  size_t length() const { return length_; }
+  bool operator==(const array &rhs) const {
+    if (this != &rhs) {
+      if (shape_ != rhs.shape_) {
+        return false;
+      }
+      // TODO: use GPU
+      return memcmp(buf_->contents(), rhs.buf_->contents(), buf_->length()) ==
+             0;
+    }
+    return true;
+  }
+
+  bool operator!=(const array &rhs) const { return !this->operator==(rhs); }
+
+  //----------------------------------------------------------------------------
+
+  size_t length() const {
+    // TODO: cache length
+    size_t l = 1;
+    for (auto n : shape_) {
+      l *= n;
+    }
+    return l;
+  }
+
+  //----------------------------------------------------------------------------
+
+  const shape_type &shape() const { return shape_; }
+
+  size_t shape(size_t i) const {
+    // TODO: bounds check
+    return shape_[i];
+  }
+
+  size_t dimension() const { return shape_.size(); }
+
+  void reshape(const shape_type &shape) {
+    // TODO: bounds check
+    shape_ = shape;
+  }
 
   //----------------------------------------------------------------------------
 
@@ -81,28 +86,45 @@ class Array {
   //----------------------------------------------------------------------------
 
   T operator[](size_t i) const {
-    bounds_check(i);
+    bounds_check_(i);
     return data()[i];
   }
 
   T &operator[](size_t i) {
-    bounds_check(i);
+    bounds_check_(i);
     return data()[i];
+  }
+
+  T operator()(size_t row, size_t col) const {
+    // TODO: bounds check
+    // bounds_check_(i);
+    return data()[shape_[1] * row + col];
+  }
+
+  T &operator()(size_t row, size_t col) {
+    // TODO: bounds check
+    // bounds_check_(i);
+    return data()[shape_[1] * row + col];
   }
 
   //----------------------------------------------------------------------------
 
   using iterator = T *;
   iterator begin() { return data(); }
-  iterator end() { return data() + length_; }
+  iterator end() { return data() + length(); }
 
   using const_iterator = const T *;
   const_iterator cbegin() const { return data(); }
-  const_iterator cend() const { return data() + length_; }
+  const_iterator cend() const { return data() + length(); }
+
+  //----------------------------------------------------------------------------
+
+  void copy(std::ranges::input_range auto &&r) { std::ranges::copy(r, data()); }
 
   //----------------------------------------------------------------------------
 
   void constants(T val) {
+    // TODO: use GPU
     for (auto &x : *this) {
       x = val;
     }
@@ -112,7 +134,8 @@ class Array {
 
   void ones() { constants(1); };
 
-  void random(size_t times = 1, T bias = 0) {
+  void random(size_t times, T bias) {
+    // TODO: use GPU
     for (auto &x : *this) {
       x = (static_cast<double>(rand()) / static_cast<double>(RAND_MAX)) *
               times +
@@ -122,44 +145,82 @@ class Array {
 
   //----------------------------------------------------------------------------
 
-  Array operator+(const Array &rhs) const {
+  array operator+(const array &rhs) const {
     if constexpr (std::is_same_v<T, float>) {
-      return compute(rhs, mtl::ComputeType::ARRAY_ADD_F);
+      return computer_(rhs, mtl::ComputeType::ARRAY_ADD_F);
     } else if constexpr (std::is_same_v<T, int>) {
-      return compute(rhs, mtl::ComputeType::ARRAY_ADD_I);
+      return computer_(rhs, mtl::ComputeType::ARRAY_ADD_I);
     } else {
-      return compute(rhs, mtl::ComputeType::ARRAY_ADD_U);
+      return computer_(rhs, mtl::ComputeType::ARRAY_ADD_U);
     }
   }
 
-  Array operator-(const Array &rhs) const {
+  array operator-(const array &rhs) const {
     if constexpr (std::is_same_v<T, float>) {
-      return compute(rhs, mtl::ComputeType::ARRAY_SUB_F);
+      return computer_(rhs, mtl::ComputeType::ARRAY_SUB_F);
     } else if constexpr (std::is_same_v<T, int>) {
-      return compute(rhs, mtl::ComputeType::ARRAY_SUB_I);
+      return computer_(rhs, mtl::ComputeType::ARRAY_SUB_I);
     } else {
-      return compute(rhs, mtl::ComputeType::ARRAY_SUB_U);
+      return computer_(rhs, mtl::ComputeType::ARRAY_SUB_U);
     }
   }
 
-  Array operator*(const Array &rhs) const {
+  array operator*(const array &rhs) const {
     if constexpr (std::is_same_v<T, float>) {
-      return compute(rhs, mtl::ComputeType::ARRAY_MUL_F);
+      return computer_(rhs, mtl::ComputeType::ARRAY_MUL_F);
     } else if constexpr (std::is_same_v<T, int>) {
-      return compute(rhs, mtl::ComputeType::ARRAY_MUL_I);
+      return computer_(rhs, mtl::ComputeType::ARRAY_MUL_I);
     } else {
-      return compute(rhs, mtl::ComputeType::ARRAY_MUL_U);
+      return computer_(rhs, mtl::ComputeType::ARRAY_MUL_U);
     }
   }
 
-  Array operator/(const Array &rhs) const {
+  array operator/(const array &rhs) const {
     if constexpr (std::is_same_v<T, float>) {
-      return compute(rhs, mtl::ComputeType::ARRAY_DIV_F);
+      return computer_(rhs, mtl::ComputeType::ARRAY_DIV_F);
     } else if constexpr (std::is_same_v<T, int>) {
-      return compute(rhs, mtl::ComputeType::ARRAY_DIV_I);
+      return computer_(rhs, mtl::ComputeType::ARRAY_DIV_I);
     } else {
-      return compute(rhs, mtl::ComputeType::ARRAY_DIV_U);
+      return computer_(rhs, mtl::ComputeType::ARRAY_DIV_U);
     }
+  }
+
+  //----------------------------------------------------------------------------
+
+  array operator+(T val) const {
+    // TODO: use GPU
+    array<T> tmp{*this};
+    for (auto &x : tmp) {
+      x += val;
+    }
+    return tmp;
+  }
+
+  array operator-(T val) const {
+    // TODO: use GPU
+    array<T> tmp{*this};
+    for (auto &x : tmp) {
+      x -= val;
+    }
+    return tmp;
+  }
+
+  array operator*(T val) const {
+    // TODO: use GPU
+    array<T> tmp{*this};
+    for (auto &x : tmp) {
+      x *= val;
+    }
+    return tmp;
+  }
+
+  array operator/(T val) const {
+    // TODO: use GPU
+    array<T> tmp{*this};
+    for (auto &x : tmp) {
+      x /= val;
+    }
+    return tmp;
   }
 
   //----------------------------------------------------------------------------
@@ -172,41 +233,102 @@ class Array {
   }
 
  private:
-  auto buf_length() const { return sizeof(T) * length_; }
+  void allocate_buffer_() { buf_ = mtl::newBuffer(sizeof(T) * length()); }
 
-  auto compute(const Array &rhs, mtl::ComputeType id) const {
-    if (length() != rhs.length()) {
+  auto computer_(const array &rhs, mtl::ComputeType id) const {
+    if (shape() != rhs.shape()) {
       std::stringstream ss;
       ss << "array: Invalid operation.";
       throw std::runtime_error(ss.str());
     }
 
-    Array tmp(length_);
+    array tmp(shape());
     mtl::compute(buf_.get(), rhs.buf_.get(), tmp.buf_.get(), id, sizeof(T));
     return tmp;
   }
 
-  void bounds_check(size_t i) const {
-    if (i >= length_) {
+  void bounds_check_(size_t i) const {
+    if (i >= length()) {
       std::stringstream ss;
       ss << "array: Index is out of bounds.";
       throw std::runtime_error(ss.str());
     }
   }
+
+  //----------------------------------------------------------------------------
+
+  shape_type shape_;
+  mtl::managed_ptr<MTL::Buffer> buf_;
 };
 
 //------------------------------------------------------------------------------
 
 template <typename T>
-inline auto random(size_t length, size_t times = 1, T bias = 0) {
-  Array<T> arr(length);
-  arr.random(times, bias);
-  return arr;
+inline size_t print(std::ostream &os, const array<T> &arr, size_t dim,
+                    size_t arr_index) {
+  if (dim + 1 == arr.dimension()) {
+    size_t i = 0;
+    for (; i < arr.shape(dim); i++, arr_index++) {
+      if (i > 0) {
+        os << ' ';
+      }
+      os << arr[arr_index];
+    }
+    return arr_index;
+  }
+
+  for (size_t i = 0; i < arr.shape(dim); i++) {
+    if (dim == 0 && i > 0) {
+      os << "\n ";
+    }
+    os << '[';
+    arr_index = print(os, arr, dim + 1, arr_index);
+    os << ']';
+  }
+  return arr_index;
+}
+
+template <typename T>
+inline std::ostream &operator<<(std::ostream &os, const array<T> &arr) {
+  os << "[";
+  print(os, arr, 0, 0);
+  os << "]";
+  return os;
+}
+
+//------------------------------------------------------------------------------
+
+namespace vec {
+
+template <typename T>
+inline auto vector(size_t length) {
+  return array<T>({length});
+}
+
+template <typename T>
+inline auto vector(std::initializer_list<T> l) {
+  array<T> tmp({l.size()});
+  tmp.copy(l);
+  return tmp;
+}
+
+template <typename T>
+inline auto vector(size_t length, std::ranges::input_range auto &&r) {
+  array<T> tmp({length});
+  tmp.copy(r);
+  return tmp;
+}
+
+template <typename T>
+inline auto random(size_t length, size_t times = 1, size_t bias = 0) {
+  auto tmp = vector<T>(length);
+  tmp.random(times, bias);
+  return tmp;
 }
 
 template <typename T>
 inline auto constants(size_t length, T val) {
-  Array<T> tmp(length);
+  auto tmp = vector<T>(length);
   tmp.constants(val);
   return tmp;
 }
@@ -221,20 +343,52 @@ inline auto ones(size_t length) {
   return constants<T>(length, 1);
 }
 
+};  // namespace vec
+
 //------------------------------------------------------------------------------
 
+namespace mat {
+
 template <typename T>
-std::ostream &operator<<(std::ostream &os, const Array<T> &arr) {
-  os << "mp::Array([";
-  for (size_t i = 0; i < arr.length(); i++) {
-    if (i > 0) {
-      os << ' ';
-    }
-    os << arr[i];
-  }
-  os << "])";
-  return os;
+inline auto matrix(size_t row, size_t col) {
+  return array<T>({row, col});
 }
 
-};  // namespace mtlcpp
+template <typename T>
+inline auto matrix(size_t row, size_t col, std::ranges::input_range auto &&r) {
+  auto tmp = matrix<T>(row, col);
+  tmp.copy(r);
+  return tmp;
+}
 
+template <typename T>
+inline auto random(size_t row, size_t col, size_t times = 1, size_t bias = 0) {
+  auto tmp = matrix<T>(row, col);
+  tmp.random(times, bias);
+  return tmp;
+}
+
+template <typename T>
+inline auto constants(size_t row, size_t col, T val) {
+  auto tmp = matrix<T>(row, col);
+  tmp.constants(val);
+  return tmp;
+}
+
+template <typename T>
+inline auto zeros(size_t row, size_t col) {
+  auto tmp = matrix<T>(row, col);
+  tmp.constants(0);
+  return tmp;
+}
+
+template <typename T>
+inline auto ones(size_t row, size_t col) {
+  auto tmp = matrix<T>(row, col);
+  tmp.constants(1);
+  return tmp;
+}
+
+};  // namespace mat
+
+};  // namespace mtl

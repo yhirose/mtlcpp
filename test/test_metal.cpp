@@ -3,7 +3,7 @@
 #include "doctest.h"
 #include "utils.h"
 
-using namespace mtlcpp;
+using namespace mtl;
 
 template <typename T, typename U>
 bool verify(const mtl::managed_ptr<MTL::Buffer> &A,
