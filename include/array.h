@@ -150,8 +150,6 @@ class array {
       return computer_(rhs, mtl::ComputeType::ARRAY_ADD_F);
     } else if constexpr (std::is_same_v<T, int>) {
       return computer_(rhs, mtl::ComputeType::ARRAY_ADD_I);
-    } else {
-      return computer_(rhs, mtl::ComputeType::ARRAY_ADD_U);
     }
   }
 
@@ -160,8 +158,6 @@ class array {
       return computer_(rhs, mtl::ComputeType::ARRAY_SUB_F);
     } else if constexpr (std::is_same_v<T, int>) {
       return computer_(rhs, mtl::ComputeType::ARRAY_SUB_I);
-    } else {
-      return computer_(rhs, mtl::ComputeType::ARRAY_SUB_U);
     }
   }
 
@@ -170,8 +166,6 @@ class array {
       return computer_(rhs, mtl::ComputeType::ARRAY_MUL_F);
     } else if constexpr (std::is_same_v<T, int>) {
       return computer_(rhs, mtl::ComputeType::ARRAY_MUL_I);
-    } else {
-      return computer_(rhs, mtl::ComputeType::ARRAY_MUL_U);
     }
   }
 
@@ -180,9 +174,25 @@ class array {
       return computer_(rhs, mtl::ComputeType::ARRAY_DIV_F);
     } else if constexpr (std::is_same_v<T, int>) {
       return computer_(rhs, mtl::ComputeType::ARRAY_DIV_I);
-    } else {
-      return computer_(rhs, mtl::ComputeType::ARRAY_DIV_U);
     }
+  }
+
+  array dot(const array &rhs) const {
+    // TODO: dimension check
+    auto rows = shape(0);
+    auto cols = rhs.shape(1);
+    array<T> tmp({rows, cols});
+
+    for (size_t row = 0; row < rows; row++) {
+      for (size_t col = 0; col < cols; col++) {
+        T val = 0;
+        for (size_t i = 0; i < shape(1); i++) {
+          val += (*this)(row, i) * rhs(i, col);
+        }
+        tmp(row, col) = val;
+      }
+    }
+    return tmp;
   }
 
   //----------------------------------------------------------------------------

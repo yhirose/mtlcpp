@@ -38,10 +38,6 @@ enum class ComputeType {
   ARRAY_SUB_I,
   ARRAY_MUL_I,
   ARRAY_DIV_I,
-  ARRAY_ADD_U,
-  ARRAY_SUB_U,
-  ARRAY_MUL_U,
-  ARRAY_DIV_U,
 };
 
 class metal {
@@ -143,42 +139,6 @@ kernel void array_div_i(
   OUT[index] = A[index] / B[index];
 }
 
-kernel void array_add_u(
-  device const unsigned int* A,
-  device const unsigned int* B,
-  device unsigned int* OUT,
-  uint index [[thread_position_in_grid]])
-{
-  OUT[index] = A[index] + B[index];
-}
-
-kernel void array_sub_u(
-  device const unsigned int* A,
-  device const unsigned int* B,
-  device unsigned int* OUT,
-  uint index [[thread_position_in_grid]])
-{
-  OUT[index] = A[index] - B[index];
-}
-
-kernel void array_mul_u(
-  device const unsigned int* A,
-  device const unsigned int* B,
-  device unsigned int* OUT,
-  uint index [[thread_position_in_grid]])
-{
-  OUT[index] = A[index] * B[index];
-}
-
-kernel void array_div_u(
-  device const unsigned int* A,
-  device const unsigned int* B,
-  device unsigned int* OUT,
-  uint index [[thread_position_in_grid]])
-{
-  OUT[index] = A[index] / B[index];
-}
-
 )";
 
 //-----------------------------------------------------------------------------
@@ -212,10 +172,6 @@ inline metal::metal(MTL::Device* device) : device_(device) {
   create_compute_pipeline_state_object_(device, lib, "array_sub_i");
   create_compute_pipeline_state_object_(device, lib, "array_mul_i");
   create_compute_pipeline_state_object_(device, lib, "array_div_i");
-  create_compute_pipeline_state_object_(device, lib, "array_add_u");
-  create_compute_pipeline_state_object_(device, lib, "array_sub_u");
-  create_compute_pipeline_state_object_(device, lib, "array_mul_u");
-  create_compute_pipeline_state_object_(device, lib, "array_div_u");
 
   // Create a command queue
   queue_ = managed(device->newCommandQueue());
