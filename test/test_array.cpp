@@ -23,9 +23,12 @@ bool verify_tolerant(const array<T> &A, const array<T> &B, const array<T> &OUT,
 TEST_CASE("vector: size") {
   auto v = vec::vector<int>(3);
   CHECK(v.length() == 3);
-  CHECK(v.shape() == shape_type{3});
-  CHECK(v.shape(0) == 3);
-  CHECK(v.dimension() == 1);
+
+  // TODO: should be `v.dimension() == 1`?
+  CHECK(v.dimension() == 2);
+  CHECK(v.shape() == shape_type{1, 3});
+  CHECK(v.shape(0) == 1);
+  CHECK(v.shape(1) == 3);
 }
 
 TEST_CASE("vector: initializer") {
@@ -149,7 +152,7 @@ TEST_CASE("matrix: ranges") {
 }
 
 TEST_CASE("matrix: arithmatic binary operations") {
-  auto r = std::views::iota(1) | std::views::take(12);
+  auto r = itoa(12);
 
   auto a = mat::matrix<int>(3, 4, r);
   auto b = mat::matrix<int>(3, 4, r);
@@ -158,6 +161,16 @@ TEST_CASE("matrix: arithmatic binary operations") {
 
   auto expected = mat::matrix<int>(
       3, 4, r | std::views::transform([](auto x) { return x * x + 1; }));
+  CHECK(expected == out);
+}
 
+TEST_CASE("vector: `dot` operation") {
+  auto a = mat::matrix<int>(3, 4, itoa(12));
+  auto b = mat::matrix<int>(4, 2, itoa(8));
+  auto out = a.dot(b);
+  CHECK(out.shape() == shape_type{3, 2});
+
+  auto expected = mat::matrix<int>(3, 2);
+  expected.copy({50, 60, 114, 140, 178, 220});
   CHECK(expected == out);
 }

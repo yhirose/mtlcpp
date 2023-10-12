@@ -53,12 +53,7 @@ class array {
   //----------------------------------------------------------------------------
 
   size_t length() const {
-    // TODO: cache length
-    size_t l = 1;
-    for (auto n : shape_) {
-      l *= n;
-    }
-    return l;
+    return buf_->length() / sizeof(T);
   }
 
   //----------------------------------------------------------------------------
@@ -120,6 +115,7 @@ class array {
   //----------------------------------------------------------------------------
 
   void copy(std::ranges::input_range auto &&r) { std::ranges::copy(r, data()); }
+  void copy(std::initializer_list<T> l) { std::ranges::copy(l, data()); }
 
   //----------------------------------------------------------------------------
 
@@ -243,7 +239,13 @@ class array {
   }
 
  private:
-  void allocate_buffer_() { buf_ = mtl::newBuffer(sizeof(T) * length()); }
+  void allocate_buffer_() {
+    size_t length = 1;
+    for (auto n : shape_) {
+      length *= n;
+    }
+    buf_ = mtl::newBuffer(sizeof(T) * length);
+  }
 
   auto computer_(const array &rhs, mtl::ComputeType id) const {
     if (shape() != rhs.shape()) {
@@ -312,19 +314,20 @@ namespace vec {
 
 template <typename T>
 inline auto vector(size_t length) {
-  return array<T>({length});
+  // TODO: should be `return array<T>({length});`?
+  return array<T>({1, length});
 }
 
 template <typename T>
 inline auto vector(std::initializer_list<T> l) {
-  array<T> tmp({l.size()});
+  auto tmp = vector<T>(l.size());
   tmp.copy(l);
   return tmp;
 }
 
 template <typename T>
 inline auto vector(size_t length, std::ranges::input_range auto &&r) {
-  array<T> tmp({length});
+  auto tmp = vector<T>(length);
   tmp.copy(r);
   return tmp;
 }

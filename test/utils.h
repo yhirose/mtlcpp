@@ -1,5 +1,9 @@
+#pragma once
+
+#include <ranges>
+
 template <typename T, typename U>
-bool verify(const T* A, const T* B, const T* OUT, size_t length, U fn) {
+inline bool verify(const T* A, const T* B, const T* OUT, size_t length, U fn) {
   size_t err = 0;
   for (size_t i = 0; i < length; i++) {
     if (OUT[i] != fn(A[i], B[i])) {
@@ -10,8 +14,8 @@ bool verify(const T* A, const T* B, const T* OUT, size_t length, U fn) {
 }
 
 template <typename T, typename U>
-bool verify_tolerant(const T* A, const T* B, const T* OUT, size_t length,
-                     U fn) {
+inline bool verify_tolerant(const T* A, const T* B, const T* OUT, size_t length,
+                            U fn) {
   size_t err = 0;
   for (size_t i = 0; i < length; i++) {
     if (std::abs(OUT[i] - fn(A[i], B[i])) > 1e-3) {
@@ -24,4 +28,8 @@ bool verify_tolerant(const T* A, const T* B, const T* OUT, size_t length,
     auto ratio = static_cast<double>(err) / length * 100.0;
     return ratio < 0.001;
   }
+}
+
+inline auto itoa(size_t size) {
+  return std::views::iota(1) | std::views::take(size);
 }
