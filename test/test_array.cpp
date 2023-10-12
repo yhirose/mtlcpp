@@ -21,34 +21,31 @@ bool verify_tolerant(const array<T> &A, const array<T> &B, const array<T> &OUT,
 //------------------------------------------------------------------------------
 
 TEST_CASE("vector: size") {
-  auto v = vec::vector<int>(3);
+  auto v = vector<int>(3);
   CHECK(v.length() == 3);
-
-  // TODO: should be `v.dimension() == 1`?
-  CHECK(v.dimension() == 2);
-  CHECK(v.shape() == shape_type{1, 3});
-  CHECK(v.shape(0) == 1);
-  CHECK(v.shape(1) == 3);
+  CHECK(v.dimension() == 1);
+  CHECK(v.shape() == shape_type{3});
+  CHECK(v.shape(0) == 3);
 }
 
 TEST_CASE("vector: initializer") {
-  auto v = vec::vector<int>({1, 2, 3, 4});
+  auto v = vector<int>({1, 2, 3, 4});
   CHECK(v.length() == 4);
 }
 
 TEST_CASE("vector: container") {
   std::vector<int> c{1, 2, 3, 4};
-  auto v = vec::vector<int>(c.size(), c);
+  auto v = vector<int>(c.size(), c);
   CHECK(v.length() == 4);
 }
 
 TEST_CASE("vector ranges") {
-  auto v = vec::vector<int>(10, std::views::iota(1) | std::views::take(10));
+  auto v = vector<int>(10, std::views::iota(1) | std::views::take(10));
   CHECK(v.length() == 10);
 }
 
 TEST_CASE("vector: `clone`") {
-  auto a = vec::ones<float>(8);
+  auto a = ones<float>(8);
   auto b = a;
   a.zeros();
   CHECK(a == b);
@@ -59,33 +56,33 @@ TEST_CASE("vector: `clone`") {
 }
 
 TEST_CASE("vector: assignment operator") {
-  auto v = vec::zeros<float>(8);
+  auto v = zeros<float>(8);
   for (size_t i = 0; i < v.length(); i++) {
     v[i] = 1;
   }
-  CHECK(vec::ones<float>(8) == v);
+  CHECK(ones<float>(8) == v);
 }
 
 TEST_CASE("vector: bounds check") {
-  auto v = vec::vector<int>(10, std::views::iota(0) | std::views::take(10));
+  auto v = vector<int>(10, std::views::iota(0) | std::views::take(10));
   CHECK(v[9] == 9);
   CHECK_THROWS_WITH_AS(v[10], "array: Index is out of bounds.",
                        std::runtime_error);
 }
 
 TEST_CASE("vector: range-for") {
-  auto v = vec::zeros<float>(8);
+  auto v = zeros<float>(8);
   for (auto &x : v) {
     x = 1;
   }
-  CHECK(vec::ones<float>(8) == v);
+  CHECK(ones<float>(8) == v);
 }
 
 TEST_CASE("vector: arithmatic binary operations") {
   constexpr size_t length = 16;
 
-  auto a = vec::random<float>(length);
-  auto b = vec::random<float>(length);
+  auto a = random<float>(length);
+  auto b = random<float>(length);
 
   auto out = a + b;
   CHECK(out.length() == length);
@@ -106,15 +103,15 @@ TEST_CASE("vector: arithmatic binary operations") {
 }
 
 TEST_CASE("vector: arithmatic binary operation errors") {
-  auto a = vec::random<float>(4);
-  auto b = vec::random<float>(8);
+  auto a = random<float>(4);
+  auto b = random<float>(8);
   CHECK(a != b);
 
   CHECK_THROWS_WITH_AS(a + b, "array: Invalid operation.", std::runtime_error);
 }
 
 TEST_CASE("vector: arithmatic functions") {
-  auto a = vec::vector<int>({1, 2, 3, 4, 5, 6});
+  auto a = vector<int>({1, 2, 3, 4, 5, 6});
   CHECK(a.sum() == 21);
 
   CHECK(a.mean() == 3);
@@ -124,7 +121,7 @@ TEST_CASE("vector: arithmatic functions") {
 //------------------------------------------------------------------------------
 
 TEST_CASE("matrix: size") {
-  auto m = mat::matrix<int>(3, 4);
+  auto m = matrix<int>(3, 4);
   CHECK(m.length() == 12);
   CHECK(m.shape() == shape_type{3, 4});
   CHECK(m.shape(0) == 3);
@@ -133,7 +130,7 @@ TEST_CASE("matrix: size") {
 }
 
 TEST_CASE("matrix: ranges") {
-  auto m = mat::matrix<int>(3, 4, std::views::iota(1) | std::views::take(12));
+  auto m = matrix<int>(3, 4, std::views::iota(1) | std::views::take(12));
 
   size_t i = 0;
   for (size_t row = 0; row < m.shape(0); row++) {
@@ -154,23 +151,55 @@ TEST_CASE("matrix: ranges") {
 TEST_CASE("matrix: arithmatic binary operations") {
   auto r = itoa(12);
 
-  auto a = mat::matrix<int>(3, 4, r);
-  auto b = mat::matrix<int>(3, 4, r);
+  auto a = matrix<int>(3, 4, r);
+  auto b = matrix<int>(3, 4, r);
   auto out = a * b;
   out = out + 1;
 
-  auto expected = mat::matrix<int>(
+  auto expected = matrix<int>(
       3, 4, r | std::views::transform([](auto x) { return x * x + 1; }));
   CHECK(expected == out);
 }
 
-TEST_CASE("vector: `dot` operation") {
-  auto a = mat::matrix<int>(3, 4, itoa(12));
-  auto b = mat::matrix<int>(4, 2, itoa(8));
+TEST_CASE("matrix: v*v `dot` operation") {
+  auto a = vector<int>(4, itoa(4));
+  auto b = vector<int>(4, itoa(4));
+  auto out = a.dot(b);
+  CHECK(out.shape() == shape_type{});
+
+  auto expected = scalar<int>(30);
+  CHECK(expected == out);
+}
+
+TEST_CASE("matrix: m*m `dot` operation") {
+  auto a = matrix<int>(3, 4, itoa(12));
+  auto b = matrix<int>(4, 2, itoa(8));
   auto out = a.dot(b);
   CHECK(out.shape() == shape_type{3, 2});
 
-  auto expected = mat::matrix<int>(3, 2);
-  expected.copy({50, 60, 114, 140, 178, 220});
+  auto expected = matrix<int>(3, 2);
+  expected.set({50, 60, 114, 140, 178, 220});
+  CHECK(expected == out);
+}
+
+TEST_CASE("matrix: v*m `dot` operation") {
+  auto a = vector<int>(4, itoa(4));
+  auto b = matrix<int>(4, 2, itoa(8));
+  auto out = a.dot(b);
+  CHECK(out.shape() == shape_type{2});
+
+  auto expected = vector<int>(2);
+  expected.set({50, 60});
+  CHECK(expected == out);
+}
+
+TEST_CASE("matrix: m*v `dot` operation") {
+  auto a = matrix<int>(2, 4, itoa(8));
+  auto b = vector<int>(4, itoa(4));
+  auto out = a.dot(b);
+  CHECK(out.shape() == shape_type{2});
+
+  auto expected = vector<int>(2);
+  expected.set({30, 70});
   CHECK(expected == out);
 }

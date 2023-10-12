@@ -3,10 +3,10 @@
 #include <metal.h>
 
 #include <concepts>
+#include <iostream>  // debug...
 #include <iterator>
 #include <numeric>
 #include <ranges>
-#include <sstream>
 
 namespace mtl {
 
@@ -52,9 +52,7 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  size_t length() const {
-    return buf_->length() / sizeof(T);
-  }
+  size_t length() const { return buf_->length() / sizeof(T); }
 
   //----------------------------------------------------------------------------
 
@@ -79,6 +77,10 @@ class array {
   const T *data() const { return static_cast<const T *>(buf_->contents()); }
 
   //----------------------------------------------------------------------------
+
+  T operator()() const { return *data(); }
+
+  T &operator()() { return *data(); }
 
   T operator[](size_t i) const {
     bounds_check_(i);
@@ -114,8 +116,8 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  void copy(std::ranges::input_range auto &&r) { std::ranges::copy(r, data()); }
-  void copy(std::initializer_list<T> l) { std::ranges::copy(l, data()); }
+  void set(std::ranges::input_range auto &&r) { std::ranges::copy(r, data()); }
+  void set(std::initializer_list<T> l) { std::ranges::copy(l, data()); }
 
   //----------------------------------------------------------------------------
 
@@ -130,12 +132,10 @@ class array {
 
   void ones() { constants(1); };
 
-  void random(size_t times, T bias) {
+  void random() {
     // TODO: use GPU
     for (auto &x : *this) {
-      x = (static_cast<double>(rand()) / static_cast<double>(RAND_MAX)) *
-              times +
-          bias;
+      x = (static_cast<double>(rand()) / static_cast<double>(RAND_MAX));
     }
   }
 
@@ -174,21 +174,65 @@ class array {
   }
 
   array dot(const array &rhs) const {
-    // TODO: dimension check
-    auto rows = shape(0);
-    auto cols = rhs.shape(1);
-    array<T> tmp({rows, cols});
+    // TODO: use GPU
+    if (dimension() == 1 && rhs.dimension() == 1 && shape(0) == rhs.shape(0)) {
+      array<T> tmp({});
 
-    for (size_t row = 0; row < rows; row++) {
+      T val = 0;
+      for (size_t i = 0; i < shape(0); i++) {
+        val += (*this)[i] * rhs[i];
+      }
+      tmp() = val;
+      return tmp;
+    }
+
+    if (dimension() == 2 && rhs.dimension() == 2 && shape(1) == rhs.shape(0)) {
+      auto rows = shape(0);
+      auto cols = rhs.shape(1);
+      array<T> tmp({rows, cols});
+
+      for (size_t row = 0; row < rows; row++) {
+        for (size_t col = 0; col < cols; col++) {
+          T val = 0;
+          for (size_t i = 0; i < shape(1); i++) {
+            val += (*this)(row, i) * rhs(i, col);
+          }
+          tmp(row, col) = val;
+        }
+      }
+      return tmp;
+    }
+
+    if (dimension() == 1 && rhs.dimension() == 2 && shape(0) == rhs.shape(0)) {
+      auto rows = 1;
+      auto cols = rhs.shape(1);
+      array<T> tmp({cols});
+
       for (size_t col = 0; col < cols; col++) {
         T val = 0;
-        for (size_t i = 0; i < shape(1); i++) {
-          val += (*this)(row, i) * rhs(i, col);
+        for (size_t i = 0; i < shape(0); i++) {
+          val += (*this)[i] * rhs(i, col);
         }
-        tmp(row, col) = val;
+        tmp[col] = val;
       }
+      return tmp;
     }
-    return tmp;
+
+    if (dimension() == 2 && rhs.dimension() == 1 && shape(1) == rhs.shape(0)) {
+      auto rows = shape(0);
+      array<T> tmp({rows});
+
+      for (size_t row = 0; row < rows; row++) {
+        T val = 0;
+        for (size_t i = 0; i < shape(1); i++) {
+          val += (*this)(row, i) * rhs[i];
+        }
+        tmp[row] = val;
+      }
+      return tmp;
+    }
+
+    throw std::runtime_error("array: can't do `dot` operation.");
   }
 
   //----------------------------------------------------------------------------
@@ -249,9 +293,7 @@ class array {
 
   auto computer_(const array &rhs, mtl::ComputeType id) const {
     if (shape() != rhs.shape()) {
-      std::stringstream ss;
-      ss << "array: Invalid operation.";
-      throw std::runtime_error(ss.str());
+      throw std::runtime_error("array: Invalid operation.");
     }
 
     array tmp(shape());
@@ -261,9 +303,7 @@ class array {
 
   void bounds_check_(size_t i) const {
     if (i >= length()) {
-      std::stringstream ss;
-      ss << "array: Index is out of bounds.";
-      throw std::runtime_error(ss.str());
+      throw std::runtime_error("array: Index is out of bounds.");
     }
   }
 
@@ -302,40 +342,55 @@ inline size_t print(std::ostream &os, const array<T> &arr, size_t dim,
 
 template <typename T>
 inline std::ostream &operator<<(std::ostream &os, const array<T> &arr) {
-  os << "[";
-  print(os, arr, 0, 0);
-  os << "]";
+  if (arr.dimension() == 0) {
+    os << arr();
+  } else {
+    os << "[";
+    print(os, arr, 0, 0);
+    os << "]";
+  }
   return os;
 }
 
 //------------------------------------------------------------------------------
 
-namespace vec {
+template <typename T>
+inline auto scalar() {
+  return array<T>({});
+}
+
+template <typename T>
+inline auto scalar(T val) {
+  auto tmp = array<T>({});
+  tmp() = val;
+  return tmp;
+}
+
+//------------------------------------------------------------------------------
 
 template <typename T>
 inline auto vector(size_t length) {
-  // TODO: should be `return array<T>({length});`?
-  return array<T>({1, length});
+  return array<T>({length});
 }
 
 template <typename T>
 inline auto vector(std::initializer_list<T> l) {
   auto tmp = vector<T>(l.size());
-  tmp.copy(l);
+  tmp.set(l);
   return tmp;
 }
 
 template <typename T>
 inline auto vector(size_t length, std::ranges::input_range auto &&r) {
   auto tmp = vector<T>(length);
-  tmp.copy(r);
+  tmp.set(r);
   return tmp;
 }
 
 template <typename T>
-inline auto random(size_t length, size_t times = 1, size_t bias = 0) {
+inline auto random(size_t length) {
   auto tmp = vector<T>(length);
-  tmp.random(times, bias);
+  tmp.random();
   return tmp;
 }
 
@@ -356,11 +411,7 @@ inline auto ones(size_t length) {
   return constants<T>(length, 1);
 }
 
-};  // namespace vec
-
 //------------------------------------------------------------------------------
-
-namespace mat {
 
 template <typename T>
 inline auto matrix(size_t row, size_t col) {
@@ -370,14 +421,14 @@ inline auto matrix(size_t row, size_t col) {
 template <typename T>
 inline auto matrix(size_t row, size_t col, std::ranges::input_range auto &&r) {
   auto tmp = matrix<T>(row, col);
-  tmp.copy(r);
+  tmp.set(r);
   return tmp;
 }
 
 template <typename T>
-inline auto random(size_t row, size_t col, size_t times = 1, size_t bias = 0) {
+inline auto random(size_t row, size_t col) {
   auto tmp = matrix<T>(row, col);
-  tmp.random(times, bias);
+  tmp.random();
   return tmp;
 }
 
@@ -401,7 +452,5 @@ inline auto ones(size_t row, size_t col) {
   tmp.constants(1);
   return tmp;
 }
-
-};  // namespace mat
 
 };  // namespace mtl

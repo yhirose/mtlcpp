@@ -39,12 +39,12 @@ void bench_array_operations() {
   size_t epochs = 10;
   const size_t length = 100'000'000;
 
-  auto a = vec::random<float>(length);
-  auto b = vec::random<float>(length);
-  auto out = vec::random<float>(length);
+  auto a = random<float>(length);
+  auto b = random<float>(length);
+  auto out = random<float>(length);
 
-  Bench().epochs(epochs).run("ones", [&] { vec::ones<float>(length); });
-  Bench().epochs(epochs).run("random", [&] { vec::random<float>(length); });
+  Bench().epochs(epochs).run("ones", [&] { ones<float>(length); });
+  Bench().epochs(epochs).run("random", [&] { random<float>(length); });
   Bench().epochs(epochs).run("a + b", [&] { a + b; });
 }
 
