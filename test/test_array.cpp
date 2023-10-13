@@ -138,12 +138,16 @@ TEST_CASE("matrix: container") {
   auto m2 = array<int>{{1, 2, 3, 4}, {5, 6, 7, 8}, {9, 10, 11, 12}};
   CHECK(m2.length() == 12);
   CHECK(m2.dimension() == 2);
-  CHECK(m2.shape() == shape_type{3,4});
+  CHECK(m2.shape() == shape_type{3, 4});
 
   auto m3 = array<int>{{{1, 2, 3}, {4, 5, 6}}, {{7, 8, 9}, {10, 11, 12}}};
   CHECK(m3.length() == 12);
   CHECK(m3.dimension() == 3);
   CHECK(m3.shape() == shape_type{2, 2, 3});
+
+  CHECK_THROWS_WITH_AS(
+      (array<int>{{{1, 2, 3}, {4, 5}}, {{7, 8, 9}, {10, 11, 12}}}),
+      "array: Invalid initializer list.", std::runtime_error);
 }
 
 TEST_CASE("matrix: ranges") {

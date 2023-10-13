@@ -3,6 +3,7 @@
 #include <metal.h>
 
 #include <concepts>
+#include <iostream>  // debug...
 #include <iterator>
 #include <numeric>
 #include <ranges>
@@ -70,15 +71,29 @@ constexpr shape_type nested_initializer_list_shape_(T l) {
 }
 
 template <typename T, typename U>
-void nested_initializer_copy_(T &&dst, const U &src) {
+constexpr void nested_initializer_copy_(T &&dst, const U &src) {
   *dst++ = src;
 }
 
 template <typename T, typename U>
-void nested_initializer_copy_(T &&dst, std::initializer_list<U> src) {
+constexpr void nested_initializer_copy_(T &&dst, std::initializer_list<U> src) {
   for (auto it = src.begin(); it != src.end(); ++it) {
     nested_initializer_copy_(std::forward<T>(dst), *it);
   }
+}
+
+template <typename T>
+constexpr size_t nested_initializer_item_count_(const T &l) {
+  return 1;
+}
+
+template <typename T>
+constexpr size_t nested_initializer_item_count_(std::initializer_list<T> l) {
+  size_t count = 0;
+  for (auto it = l.begin(); it != l.end(); ++it) {
+    count += nested_initializer_item_count_(*it);
+  }
+  return count;
 }
 
 template <typename T, size_t I>
@@ -97,18 +112,15 @@ class array {
 
   array(nested_initializer_list<T, 1> l)
       : shape_(nested_initializer_list_shape_(l)) {
-    allocate_buffer_();
-    nested_initializer_copy_(data(), l);
+    allocate_buffer_and_copy_(l);
   }
   array(nested_initializer_list<T, 2> l)
       : shape_(nested_initializer_list_shape_(l)) {
-    allocate_buffer_();
-    nested_initializer_copy_(data(), l);
+    allocate_buffer_and_copy_(l);
   }
   array(nested_initializer_list<T, 3> l)
       : shape_(nested_initializer_list_shape_(l)) {
-    allocate_buffer_();
-    nested_initializer_copy_(data(), l);
+    allocate_buffer_and_copy_(l);
   }
 
   //----------------------------------------------------------------------------
@@ -361,6 +373,14 @@ class array {
 
   //----------------------------------------------------------------------------
 
+  auto transpose() const {
+    array tmp(shape_);
+    // TODO: implement
+    return tmp;
+  }
+
+  //----------------------------------------------------------------------------
+
   auto sum() const { return std::accumulate(cbegin(), cend(), 0); }
 
   template <typename U = float>
@@ -377,12 +397,21 @@ class array {
     buf_ = mtl::newBuffer(sizeof(T) * length);
   }
 
+  template <typename U>
+  void allocate_buffer_and_copy_(const U &l) {
+    allocate_buffer_();
+    if (nested_initializer_item_count_(l) != length()) {
+      throw std::runtime_error("array: Invalid initializer list.");
+    }
+    nested_initializer_copy_(data(), l);
+  }
+
   auto compute_(const array &rhs, mtl::ComputeType id) const {
     if (shape() != rhs.shape()) {
       throw std::runtime_error("array: Invalid operation.");
     }
 
-    array tmp(shape());
+    array tmp(shape_);
     mtl::compute(buf_.get(), rhs.buf_.get(), tmp.buf_.get(), id, sizeof(T));
     return tmp;
   }
@@ -397,7 +426,6 @@ class array {
 
   shape_type shape_;
   mtl::managed_ptr<MTL::Buffer> buf_;
-  bool transposed_ = false;
 };
 
 //------------------------------------------------------------------------------
