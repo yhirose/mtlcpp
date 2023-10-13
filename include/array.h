@@ -192,14 +192,26 @@ class array {
 
   T operator()(size_t row, size_t col) const {
     // TODO: bounds check
-    // bounds_check_(i);
+    // bounds_check_(row, col);
     return data()[shape_[1] * row + col];
   }
 
   T &operator()(size_t row, size_t col) {
     // TODO: bounds check
-    // bounds_check_(i);
+    // bounds_check_(row, col);
     return data()[shape_[1] * row + col];
+  }
+
+  T operator()(size_t x, size_t y, size_t z) const {
+    // TODO: bounds check
+    // bounds_check_(x, y, z);
+    return data()[(shape_[1] * shape_[2] * x) + (shape_[2] * y) + z];
+  }
+
+  T &operator()(size_t x, size_t y, size_t z) {
+    // TODO: bounds check
+    // bounds_check_(x, y, z);
+    return data()[(shape_[1] * shape_[2] * x) + (shape_[2] * y) + z];
   }
 
   //----------------------------------------------------------------------------
@@ -214,6 +226,9 @@ class array {
 
   //----------------------------------------------------------------------------
 
+  void set(std::input_iterator auto b, std::input_iterator auto e) {
+    std::copy(b, e, data());
+  }
   void set(std::ranges::input_range auto &&r) { std::ranges::copy(r, data()); }
   void set(std::initializer_list<T> l) { std::ranges::copy(l, data()); }
 
@@ -374,9 +389,68 @@ class array {
   //----------------------------------------------------------------------------
 
   auto transpose() const {
-    array tmp(shape_);
-    // TODO: implement
-    return tmp;
+    // TODO: use GPU
+    if (dimension() == 1) {
+      auto tmp = clone();
+      tmp.reshape({1, length()});
+
+      auto it = cbegin();
+      for (size_t col = 0; col < length(); col++) {
+        tmp(0, col) = *it;
+        ++it;
+      }
+      return tmp;
+    }
+
+    if (dimension() == 2) {
+      if (shape_[0] == 1) {
+        auto tmp = clone();
+        tmp.reshape({length()});
+
+        auto it = cbegin();
+        for (size_t row = 0; row < length(); row++) {
+          tmp(row, 0) = *it;
+          ++it;
+        }
+        return tmp;
+      } else {
+        auto shape = shape_;
+        std::ranges::reverse(shape);
+
+        auto tmp = clone();
+        tmp.reshape(shape);
+
+        auto it = cbegin();
+        for (size_t col = 0; col < shape[1]; col++) {
+          for (size_t row = 0; row < shape[0]; row++) {
+            tmp(row, col) = *it;
+            ++it;
+          }
+        }
+        return tmp;
+      }
+    }
+
+    if (dimension() == 3) {
+      auto shape = shape_;
+      std::ranges::reverse(shape);
+
+      auto tmp = clone();
+      tmp.reshape(shape);
+
+      auto it = cbegin();
+      for (size_t z = 0; z < shape[2]; z++) {
+        for (size_t y = 0; y < shape[1]; y++) {
+          for (size_t x = 0; x < shape[0]; x++) {
+            tmp(x, y, z) = *it;
+            ++it;
+          }
+        }
+      }
+      return tmp;
+    }
+
+    throw std::runtime_error("array: can't do `transpose` operation.");
   }
 
   //----------------------------------------------------------------------------
@@ -434,8 +508,7 @@ template <typename T>
 inline size_t print(std::ostream &os, const array<T> &arr, size_t dim,
                     size_t arr_index) {
   if (dim + 1 == arr.dimension()) {
-    size_t i = 0;
-    for (; i < arr.shape(dim); i++, arr_index++) {
+    for (size_t i = 0; i < arr.shape(dim); i++, arr_index++) {
       if (i > 0) {
         os << ' ';
       }
@@ -445,8 +518,12 @@ inline size_t print(std::ostream &os, const array<T> &arr, size_t dim,
   }
 
   for (size_t i = 0; i < arr.shape(dim); i++) {
-    if (dim == 0 && i > 0) {
+    // if (dim == 0 && i > 0) {
+    if (dim < arr.dimension() && i > 0) {
       os << "\n ";
+      for (size_t j = 0; j < dim; j++) {
+        os << ' ';
+      }
     }
     os << '[';
     arr_index = print(os, arr, dim + 1, arr_index);

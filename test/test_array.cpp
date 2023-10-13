@@ -224,3 +224,51 @@ TEST_CASE("matrix: m*v `dot` operation") {
   expected.set({30, 70});
   CHECK(expected == out);
 }
+
+TEST_CASE("matrix: transpose") {
+  auto v = array<int>{1, 2, 3, 4};
+  auto vT = v.transpose();
+  CHECK(vT.length() == 4);
+  CHECK(vT.dimension() == 2);
+  CHECK(vT.shape() == shape_type{1, 4});
+  auto vT_expected = array<int>{1, 2, 3, 4};
+  vT_expected.reshape({1, 4});
+  CHECK(vT == vT_expected);
+
+  auto vT2 = vT.transpose();
+  CHECK(vT2.length() == 4);
+  CHECK(vT2.dimension() == 1);
+  CHECK(vT2.shape() == shape_type{4});
+  auto vT2_expected = array<int>{1, 2, 3, 4};
+  CHECK(vT2 == vT2_expected);
+
+  auto m2 = array<int>{{1, 2, 3, 4}, {5, 6, 7, 8}, {9, 10, 11, 12}};
+  auto m2T = m2.transpose();
+  CHECK(m2T.length() == 12);
+  CHECK(m2T.dimension() == 2);
+  CHECK(m2T.shape() == shape_type{4, 3});
+  CHECK(m2T == array<int>{{1, 5, 9}, {2, 6, 10}, {3, 7, 11}, {4, 8, 12}});
+
+  auto m2T2 = m2T.transpose();
+  CHECK(m2T2.length() == m2.length());
+  CHECK(m2T2.dimension() == m2.dimension());
+  CHECK(m2T2.shape() == m2.shape());
+  CHECK(m2T2 == m2);
+
+  auto m3 = array<int>{{{1, 2, 3, 4}, {5, 6, 7, 8}}, {{9, 10, 11, 12}, {13, 14, 15, 16}}};
+  CHECK(m3.length() == 16);
+  CHECK(m3.dimension() == 3);
+  CHECK(m3.shape() == shape_type{2, 2, 4});
+
+  auto m3T = m3.transpose();
+  CHECK(m3T.length() == 16);
+  CHECK(m3T.dimension() == 3);
+  CHECK(m3T.shape() == shape_type{4, 2, 2});
+
+  auto m3T2 = m3T.transpose();
+  CHECK(m3T2.length() == m3.length());
+  CHECK(m3T2.dimension() == m3.dimension());
+  CHECK(m3T2.shape() == m3.shape());
+  CHECK(m3T2 == m3);
+}
+
