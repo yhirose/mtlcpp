@@ -363,7 +363,7 @@ class array {
 
   auto sum() const { return std::accumulate(cbegin(), cend(), 0); }
 
-  template <typename U = T>
+  template <typename U = float>
   auto mean() const {
     return std::accumulate(cbegin(), cend(), 0) / static_cast<U>(length());
   }

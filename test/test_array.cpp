@@ -114,8 +114,8 @@ TEST_CASE("vector: arithmatic functions") {
   auto a = array<int>{1, 2, 3, 4, 5, 6};
   CHECK(a.sum() == 21);
 
-  CHECK(a.mean() == 3);
-  CHECK(a.mean<double>() == 3.5);
+  CHECK(a.mean() == 3.5);
+  CHECK(a.mean<int>() == 3);
 }
 
 //------------------------------------------------------------------------------
