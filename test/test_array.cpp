@@ -29,7 +29,7 @@ TEST_CASE("vector: size") {
 }
 
 TEST_CASE("vector: initializer") {
-  auto v = vector<int>({1, 2, 3, 4});
+  auto v = array<int>{1, 2, 3, 4};
   CHECK(v.length() == 4);
 }
 
@@ -111,7 +111,7 @@ TEST_CASE("vector: arithmatic binary operation errors") {
 }
 
 TEST_CASE("vector: arithmatic functions") {
-  auto a = vector<int>({1, 2, 3, 4, 5, 6});
+  auto a = array<int>{1, 2, 3, 4, 5, 6};
   CHECK(a.sum() == 21);
 
   CHECK(a.mean() == 3);
@@ -127,6 +127,23 @@ TEST_CASE("matrix: size") {
   CHECK(m.shape(0) == 3);
   CHECK(m.shape(1) == 4);
   CHECK(m.dimension() == 2);
+}
+
+TEST_CASE("matrix: container") {
+  auto m1 = array<int>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  CHECK(m1.length() == 12);
+  CHECK(m1.dimension() == 1);
+  CHECK(m1.shape() == shape_type{12});
+
+  auto m2 = array<int>{{1, 2, 3, 4}, {5, 6, 7, 8}, {9, 10, 11, 12}};
+  CHECK(m2.length() == 12);
+  CHECK(m2.dimension() == 2);
+  CHECK(m2.shape() == shape_type{3,4});
+
+  auto m3 = array<int>{{{1, 2, 3}, {4, 5, 6}}, {{7, 8, 9}, {10, 11, 12}}};
+  CHECK(m3.length() == 12);
+  CHECK(m3.dimension() == 3);
+  CHECK(m3.shape() == shape_type{2, 2, 3});
 }
 
 TEST_CASE("matrix: ranges") {

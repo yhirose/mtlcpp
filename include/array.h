@@ -3,7 +3,6 @@
 #include <metal.h>
 
 #include <concepts>
-#include <iostream>  // debug...
 #include <iterator>
 #include <numeric>
 #include <ranges>
@@ -11,10 +10,81 @@
 namespace mtl {
 
 template <typename T>
-concept value_type = std::is_same_v<T, float> || std::is_same_v<T, int> ||
-                     std::is_same_v<T, unsigned int>;
+concept value_type = std::same_as<T, float> || std::same_as<T, int>;
 
 using shape_type = std::vector<size_t>;
+
+//------------------------------------------------------------------------------
+
+template <typename T, size_t I>
+struct nested_initializer_list_ {
+  using nested_type = typename nested_initializer_list_<T, I - 1>::type;
+  using type = std::initializer_list<nested_type>;
+};
+
+template <typename T>
+struct nested_initializer_list_<T, 0> {
+  using type = T;
+};
+
+template <typename T>
+struct depth_ {
+  static constexpr size_t value = 0;
+};
+
+template <typename T>
+struct depth_<std::initializer_list<T>> {
+  static constexpr size_t value = 1 + depth_<T>::value;
+};
+
+template <size_t I>
+struct shape_value_ {
+  template <typename T>
+  static constexpr size_t value(T l) {
+    return l.size() == 0 ? 0 : shape_value_<I - 1>::value(*l.begin());
+  }
+};
+
+template <>
+struct shape_value_<0> {
+  template <typename T>
+  static constexpr size_t value(T l) {
+    return l.size();
+  }
+};
+
+template <typename T, size_t... I>
+constexpr shape_type shape_(T l, std::index_sequence<I...>) {
+  return {shape_type::value_type(shape_value_<I>::value(l))...};
+}
+
+template <typename T>
+constexpr size_t nested_initializer_list_dimension_() {
+  return depth_<T>::value;
+};
+
+template <typename T>
+constexpr shape_type nested_initializer_list_shape_(T l) {
+  return shape_<T>(
+      l, std::make_index_sequence<nested_initializer_list_dimension_<T>()>());
+}
+
+template <typename T, typename U>
+void nested_initializer_copy_(T &&dst, const U &src) {
+  *dst++ = src;
+}
+
+template <typename T, typename U>
+void nested_initializer_copy_(T &&dst, std::initializer_list<U> src) {
+  for (auto it = src.begin(); it != src.end(); ++it) {
+    nested_initializer_copy_(std::forward<T>(dst), *it);
+  }
+}
+
+template <typename T, size_t I>
+using nested_initializer_list = typename nested_initializer_list_<T, I>::type;
+
+//------------------------------------------------------------------------------
 
 template <value_type T>
 class array {
@@ -24,6 +94,22 @@ class array {
   array &operator=(const array &rhs) = default;  // TODO: use GPU
                                                  //
   array(const shape_type &shape) : shape_(shape) { allocate_buffer_(); }
+
+  array(nested_initializer_list<T, 1> l)
+      : shape_(nested_initializer_list_shape_(l)) {
+    allocate_buffer_();
+    nested_initializer_copy_(data(), l);
+  }
+  array(nested_initializer_list<T, 2> l)
+      : shape_(nested_initializer_list_shape_(l)) {
+    allocate_buffer_();
+    nested_initializer_copy_(data(), l);
+  }
+  array(nested_initializer_list<T, 3> l)
+      : shape_(nested_initializer_list_shape_(l)) {
+    allocate_buffer_();
+    nested_initializer_copy_(data(), l);
+  }
 
   //----------------------------------------------------------------------------
 
@@ -143,40 +229,40 @@ class array {
 
   array operator+(const array &rhs) const {
     if constexpr (std::is_same_v<T, float>) {
-      return computer_(rhs, mtl::ComputeType::ARRAY_ADD_F);
+      return compute_(rhs, mtl::ComputeType::ARRAY_ADD_F);
     } else if constexpr (std::is_same_v<T, int>) {
-      return computer_(rhs, mtl::ComputeType::ARRAY_ADD_I);
+      return compute_(rhs, mtl::ComputeType::ARRAY_ADD_I);
     }
   }
 
   array operator-(const array &rhs) const {
     if constexpr (std::is_same_v<T, float>) {
-      return computer_(rhs, mtl::ComputeType::ARRAY_SUB_F);
+      return compute_(rhs, mtl::ComputeType::ARRAY_SUB_F);
     } else if constexpr (std::is_same_v<T, int>) {
-      return computer_(rhs, mtl::ComputeType::ARRAY_SUB_I);
+      return compute_(rhs, mtl::ComputeType::ARRAY_SUB_I);
     }
   }
 
   array operator*(const array &rhs) const {
     if constexpr (std::is_same_v<T, float>) {
-      return computer_(rhs, mtl::ComputeType::ARRAY_MUL_F);
+      return compute_(rhs, mtl::ComputeType::ARRAY_MUL_F);
     } else if constexpr (std::is_same_v<T, int>) {
-      return computer_(rhs, mtl::ComputeType::ARRAY_MUL_I);
+      return compute_(rhs, mtl::ComputeType::ARRAY_MUL_I);
     }
   }
 
   array operator/(const array &rhs) const {
     if constexpr (std::is_same_v<T, float>) {
-      return computer_(rhs, mtl::ComputeType::ARRAY_DIV_F);
+      return compute_(rhs, mtl::ComputeType::ARRAY_DIV_F);
     } else if constexpr (std::is_same_v<T, int>) {
-      return computer_(rhs, mtl::ComputeType::ARRAY_DIV_I);
+      return compute_(rhs, mtl::ComputeType::ARRAY_DIV_I);
     }
   }
 
   array dot(const array &rhs) const {
     // TODO: use GPU
     if (dimension() == 1 && rhs.dimension() == 1 && shape(0) == rhs.shape(0)) {
-      array<T> tmp({});
+      array<T> tmp(shape_type{});
 
       T val = 0;
       for (size_t i = 0; i < shape(0); i++) {
@@ -189,7 +275,7 @@ class array {
     if (dimension() == 2 && rhs.dimension() == 2 && shape(1) == rhs.shape(0)) {
       auto rows = shape(0);
       auto cols = rhs.shape(1);
-      array<T> tmp({rows, cols});
+      array<T> tmp(shape_type{rows, cols});
 
       for (size_t row = 0; row < rows; row++) {
         for (size_t col = 0; col < cols; col++) {
@@ -206,7 +292,7 @@ class array {
     if (dimension() == 1 && rhs.dimension() == 2 && shape(0) == rhs.shape(0)) {
       auto rows = 1;
       auto cols = rhs.shape(1);
-      array<T> tmp({cols});
+      array<T> tmp(shape_type{cols});
 
       for (size_t col = 0; col < cols; col++) {
         T val = 0;
@@ -220,7 +306,7 @@ class array {
 
     if (dimension() == 2 && rhs.dimension() == 1 && shape(1) == rhs.shape(0)) {
       auto rows = shape(0);
-      array<T> tmp({rows});
+      array<T> tmp(shape_type{rows});
 
       for (size_t row = 0; row < rows; row++) {
         T val = 0;
@@ -291,7 +377,7 @@ class array {
     buf_ = mtl::newBuffer(sizeof(T) * length);
   }
 
-  auto computer_(const array &rhs, mtl::ComputeType id) const {
+  auto compute_(const array &rhs, mtl::ComputeType id) const {
     if (shape() != rhs.shape()) {
       throw std::runtime_error("array: Invalid operation.");
     }
@@ -311,6 +397,7 @@ class array {
 
   shape_type shape_;
   mtl::managed_ptr<MTL::Buffer> buf_;
+  bool transposed_ = false;
 };
 
 //------------------------------------------------------------------------------
@@ -361,7 +448,7 @@ inline auto scalar() {
 
 template <typename T>
 inline auto scalar(T val) {
-  auto tmp = array<T>({});
+  auto tmp = array<T>(shape_type{});
   tmp() = val;
   return tmp;
 }
@@ -370,14 +457,7 @@ inline auto scalar(T val) {
 
 template <typename T>
 inline auto vector(size_t length) {
-  return array<T>({length});
-}
-
-template <typename T>
-inline auto vector(std::initializer_list<T> l) {
-  auto tmp = vector<T>(l.size());
-  tmp.set(l);
-  return tmp;
+  return array<T>(shape_type{length});
 }
 
 template <typename T>
@@ -415,7 +495,7 @@ inline auto ones(size_t length) {
 
 template <typename T>
 inline auto matrix(size_t row, size_t col) {
-  return array<T>({row, col});
+  return array<T>(shape_type{row, col});
 }
 
 template <typename T>
@@ -423,6 +503,11 @@ inline auto matrix(size_t row, size_t col, std::ranges::input_range auto &&r) {
   auto tmp = matrix<T>(row, col);
   tmp.set(r);
   return tmp;
+}
+
+template <typename T>
+inline auto matrix(nested_initializer_list<T, 2> l) {
+  return array<T>(l);
 }
 
 template <typename T>
