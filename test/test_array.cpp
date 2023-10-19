@@ -66,7 +66,7 @@ TEST_CASE("vector: assignment operator") {
 TEST_CASE("vector: bounds check") {
   auto v = vector<int>(10, std::views::iota(0) | std::views::take(10));
   CHECK(v[9] == 9);
-  CHECK_THROWS_WITH_AS(v[10], "array: Index is out of bounds.",
+  CHECK_THROWS_WITH_AS(v[10], "array: index is out of bounds.",
                        std::runtime_error);
 }
 
@@ -78,7 +78,7 @@ TEST_CASE("vector: range-for") {
   CHECK(ones<float>(8) == v);
 }
 
-TEST_CASE("vector: arithmatic binary operations") {
+TEST_CASE("vector: arithmatic operations") {
   constexpr size_t length = 16;
 
   auto a = random<float>(length);
@@ -102,12 +102,12 @@ TEST_CASE("vector: arithmatic binary operations") {
       verify_tolerant<float>(a, b, out, [](auto a, auto b) { return a / b; }));
 }
 
-TEST_CASE("vector: arithmatic binary operation errors") {
+TEST_CASE("vector: arithmatic operation errors") {
   auto a = random<float>(4);
   auto b = random<float>(8);
   CHECK(a != b);
 
-  CHECK_THROWS_WITH_AS(a + b, "array: Invalid operation.", std::runtime_error);
+  CHECK_THROWS_WITH_AS(a + b, "array: invalid operation.", std::runtime_error);
 }
 
 TEST_CASE("vector: arithmatic functions") {
@@ -127,6 +127,8 @@ TEST_CASE("matrix: size") {
   CHECK(m.shape(0) == 3);
   CHECK(m.shape(1) == 4);
   CHECK(m.dimension() == 2);
+  CHECK_THROWS_WITH_AS(m.shape(2), "array: index is out of bounds.",
+                       std::runtime_error);
 }
 
 TEST_CASE("matrix: container") {
@@ -147,7 +149,7 @@ TEST_CASE("matrix: container") {
 
   CHECK_THROWS_WITH_AS(
       (array<int>{{{1, 2, 3}, {4, 5}}, {{7, 8, 9}, {10, 11, 12}}}),
-      "array: Invalid initializer list.", std::runtime_error);
+      "array: invalid initializer list.", std::runtime_error);
 }
 
 TEST_CASE("matrix: ranges") {
@@ -156,7 +158,7 @@ TEST_CASE("matrix: ranges") {
   size_t i = 0;
   for (size_t row = 0; row < m.shape(0); row++) {
     for (size_t col = 0; col < m.shape(1); col++) {
-      CHECK(m(row, col) == m[i]);
+      CHECK(m.at(row, col) == m[i]);
       i++;
     }
   }
@@ -169,17 +171,27 @@ TEST_CASE("matrix: ranges") {
  [9 10 11 12]])" == ss.str());
 }
 
-TEST_CASE("matrix: arithmatic binary operations") {
+TEST_CASE("matrix: arithmatic operations") {
   auto r = itoa(12);
-
   auto a = matrix<int>(3, 4, r);
   auto b = matrix<int>(3, 4, r);
-  auto out = a * b;
-  out = out + 1;
+  CHECK(a + b == array<int>{{2, 4, 6, 8}, {10, 12, 14, 16}, {18, 20, 22, 24}});
+  CHECK(a - b == array<int>{{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}});
+  CHECK(a * b ==
+        array<int>{{1, 4, 9, 16}, {25, 36, 49, 64}, {81, 100, 121, 144}});
+  CHECK(a / b == array<int>{{1, 1, 1, 1}, {1, 1, 1, 1}, {1, 1, 1, 1}});
+}
 
-  auto expected = matrix<int>(
-      3, 4, r | std::views::transform([](auto x) { return x * x + 1; }));
-  CHECK(expected == out);
+TEST_CASE("matrix: arithmatic operations with scalar") {
+  auto a = array<float>{{1, 2}, {3, 4}};
+  CHECK(a + 1 == array<float>{{2, 3}, {4, 5}});
+  CHECK(a - 1 == array<float>{{0, 1}, {2, 3}});
+  CHECK(a * 2 == array<float>{{2, 4}, {6, 8}});
+  CHECK(a / 2 == array<float>{{0.5, 1}, {1.5, 2}});
+  CHECK(1 + a == array<float>{{2, 3}, {4, 5}});
+  CHECK(1 - a == array<float>{{0, -1}, {-2, -3}});
+  CHECK(2 * a == array<float>{{2, 4}, {6, 8}});
+  CHECK(2 / a == array<float>{{2, 1}, {2.0 / 3.0, 0.5}});
 }
 
 TEST_CASE("matrix: v*v `dot` operation") {
@@ -188,8 +200,8 @@ TEST_CASE("matrix: v*v `dot` operation") {
   auto out = a.dot(b);
   CHECK(out.shape() == shape_type{});
 
-  auto expected = scalar<int>(30);
-  CHECK(expected == out);
+  auto expected = array<int>(30);
+  CHECK(out == expected);
 }
 
 TEST_CASE("matrix: m*m `dot` operation") {
@@ -200,7 +212,7 @@ TEST_CASE("matrix: m*m `dot` operation") {
 
   auto expected = matrix<int>(3, 2);
   expected.set({50, 60, 114, 140, 178, 220});
-  CHECK(expected == out);
+  CHECK(out == expected);
 }
 
 TEST_CASE("matrix: v*m `dot` operation") {
@@ -211,7 +223,7 @@ TEST_CASE("matrix: v*m `dot` operation") {
 
   auto expected = vector<int>(2);
   expected.set({50, 60});
-  CHECK(expected == out);
+  CHECK(out == expected);
 }
 
 TEST_CASE("matrix: m*v `dot` operation") {
@@ -222,7 +234,7 @@ TEST_CASE("matrix: m*v `dot` operation") {
 
   auto expected = vector<int>(2);
   expected.set({30, 70});
-  CHECK(expected == out);
+  CHECK(out == expected);
 }
 
 TEST_CASE("matrix: transpose") {
@@ -255,7 +267,8 @@ TEST_CASE("matrix: transpose") {
   CHECK(m2T2.shape() == m2.shape());
   CHECK(m2T2 == m2);
 
-  auto m3 = array<int>{{{1, 2, 3, 4}, {5, 6, 7, 8}}, {{9, 10, 11, 12}, {13, 14, 15, 16}}};
+  auto m3 = array<int>{{{1, 2, 3, 4}, {5, 6, 7, 8}},
+                       {{9, 10, 11, 12}, {13, 14, 15, 16}}};
   CHECK(m3.length() == 16);
   CHECK(m3.dimension() == 3);
   CHECK(m3.shape() == shape_type{2, 2, 4});
@@ -272,3 +285,54 @@ TEST_CASE("matrix: transpose") {
   CHECK(m3T2 == m3);
 }
 
+TEST_CASE("matrix: broadcast") {
+  auto a = array<int>{{1, 2, 3}, {4, 5, 6}};
+  auto b = a.broadcast({3, 2, 3});
+
+  CHECK(b == array<int>{{{1, 2, 3}, {4, 5, 6}},
+                        {{1, 2, 3}, {4, 5, 6}},
+                        {{1, 2, 3}, {4, 5, 6}}});
+
+  CHECK(b.length() == 18);
+  CHECK(b.buffer_length() == 6);
+  CHECK(b.buffer_bytes() == 6 * sizeof(int));
+
+  CHECK(b[0] == 1);
+  CHECK(b[b.length() - 1] == 6);
+
+  CHECK(b.at(0, 0, 0) == 1);
+  CHECK(b.at(1, 1, 0) == 4);
+  CHECK(b.at(2, 1, 2) == 6);
+
+  CHECK(b.strides().size() == 3);
+  CHECK(b.strides()[0] == 0);
+  CHECK(b.strides()[1] == 3);
+  CHECK(b.strides()[2] == 1);
+}
+
+TEST_CASE("matrix: arithmatic operations with broadcast") {
+  auto a_2_3 = array<int>{{1, 2, 3}, {4, 5, 6}};
+  auto a_2_2_3 = array<int>{{{1, 2, 3}, {4, 5, 6}}, {{7, 8, 9}, {10, 11, 12}}};
+
+  auto b = array<int>(1);
+  auto b_3 = array<int>{1, 2, 3};
+  auto b_2_3 = array<int>{{1, 2, 3}, {4, 5, 6}};
+
+  CHECK(a_2_3 + b == array<int>{{2, 3, 4}, {5, 6, 7}});
+  CHECK(a_2_2_3 + b ==
+        array<int>{{{2, 3, 4}, {5, 6, 7}}, {{8, 9, 10}, {11, 12, 13}}});
+  CHECK(a_2_3 + b_3 == array<int>{{2, 4, 6}, {5, 7, 9}});
+  CHECK(a_2_2_3 + b_3 ==
+        array<int>{{{2, 4, 6}, {5, 7, 9}}, {{8, 10, 12}, {11, 13, 15}}});
+  CHECK(a_2_2_3 + b_2_3 ==
+        array<int>{{{2, 4, 6}, {8, 10, 12}}, {{8, 10, 12}, {14, 16, 18}}});
+
+  CHECK(b + a_2_3 == array<int>{{2, 3, 4}, {5, 6, 7}});
+  CHECK(b + a_2_2_3 ==
+        array<int>{{{2, 3, 4}, {5, 6, 7}}, {{8, 9, 10}, {11, 12, 13}}});
+  CHECK(b_3 + a_2_3 == array<int>{{2, 4, 6}, {5, 7, 9}});
+  CHECK(b_3 + a_2_2_3 ==
+        array<int>{{{2, 4, 6}, {5, 7, 9}}, {{8, 10, 12}, {11, 13, 15}}});
+  CHECK(b_2_3 + a_2_2_3 ==
+        array<int>{{{2, 4, 6}, {8, 10, 12}}, {{8, 10, 12}, {14, 16, 18}}});
+}

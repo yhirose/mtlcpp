@@ -3,17 +3,13 @@
 #include <metal.h>
 
 #include <concepts>
-#include <iostream>  // debug...
 #include <iterator>
-#include <numeric>
 #include <ranges>
 
 namespace mtl {
 
-template <typename T>
-concept value_type = std::same_as<T, float> || std::same_as<T, int>;
-
 using shape_type = std::vector<size_t>;
+using strides_type = std::vector<size_t>;
 
 //------------------------------------------------------------------------------
 
@@ -70,8 +66,8 @@ constexpr shape_type nested_initializer_list_shape_(T l) {
       l, std::make_index_sequence<nested_initializer_list_dimension_<T>()>());
 }
 
-template <typename T, typename U>
-constexpr void nested_initializer_copy_(T &&dst, const U &src) {
+template <typename T>
+constexpr void nested_initializer_copy_(T &&dst, const auto &src) {
   *dst++ = src;
 }
 
@@ -103,24 +99,39 @@ using nested_initializer_list = typename nested_initializer_list_<T, I>::type;
 
 template <value_type T>
 class array {
+ private:
+  shape_type shape_;
+  strides_type strides_;
+  size_t length_ = 0;
+  mtl::managed_ptr<MTL::Buffer> buf_;
+
  public:
   array(array &&rhs) = default;
   array(const array &rhs) = default;             // TODO: use GPU
   array &operator=(const array &rhs) = default;  // TODO: use GPU
-                                                 //
-  array(const shape_type &shape) : shape_(shape) { allocate_buffer_(); }
+
+  array(const shape_type &shape) {
+    reshape(shape);
+    allocate_buffer_();
+  }
+
+  array(T val) : array(shape_type({})) { *data() = val; }
 
   array(nested_initializer_list<T, 1> l)
-      : shape_(nested_initializer_list_shape_(l)) {
-    allocate_buffer_and_copy_(l);
+      : array(nested_initializer_list_shape_(l)) {
+    copy_initializer_list_(l);
   }
   array(nested_initializer_list<T, 2> l)
-      : shape_(nested_initializer_list_shape_(l)) {
-    allocate_buffer_and_copy_(l);
+      : array(nested_initializer_list_shape_(l)) {
+    copy_initializer_list_(l);
   }
   array(nested_initializer_list<T, 3> l)
-      : shape_(nested_initializer_list_shape_(l)) {
-    allocate_buffer_and_copy_(l);
+      : array(nested_initializer_list_shape_(l)) {
+    copy_initializer_list_(l);
+  }
+  array(nested_initializer_list<T, 4> l)
+      : array(nested_initializer_list_shape_(l)) {
+    copy_initializer_list_(l);
   }
 
   //----------------------------------------------------------------------------
@@ -128,7 +139,7 @@ class array {
   array clone() const {
     array tmp(shape_);
     // TODO: use GPU
-    memcpy(tmp.buf_->contents(), buf_->contents(), buf_->length());
+    tmp.set(cbegin(), cend());
     return tmp;
   }
 
@@ -140,32 +151,93 @@ class array {
         return false;
       }
       // TODO: use GPU
-      return memcmp(buf_->contents(), rhs.buf_->contents(), buf_->length()) ==
-             0;
+      for (size_t i = 0; i < length(); i++) {
+        if (at(i) != rhs.at(i)) {
+          return false;
+        }
+      }
     }
     return true;
   }
 
-  bool operator!=(const array &rhs) const { return !this->operator==(rhs); }
-
   //----------------------------------------------------------------------------
 
-  size_t length() const { return buf_->length() / sizeof(T); }
+  size_t length() const { return length_; }
+
+  size_t buffer_length() const { return buf_->length() / sizeof(T); }
+
+  size_t buffer_bytes() const { return buf_->length(); }
 
   //----------------------------------------------------------------------------
 
   const shape_type &shape() const { return shape_; }
 
+  const strides_type &strides() const { return strides_; }
+
   size_t shape(size_t i) const {
-    // TODO: bounds check
+    if (i >= shape_.size()) {
+      throw std::runtime_error("array: index is out of bounds.");
+    }
     return shape_[i];
   }
 
   size_t dimension() const { return shape_.size(); }
 
   void reshape(const shape_type &shape) {
-    // TODO: bounds check
+    // TODO: check the shape
+
     shape_ = shape;
+
+    // length
+    length_ = 1;
+    for (auto n : shape) {
+      length_ *= n;
+    }
+
+    // strides
+    strides_.clear();
+    strides_.push_back(1);
+    if (!strides_.empty()) {
+      for (int i = shape.size() - 1; i > 0; i--) {
+        auto n = strides_.front() * shape[i];
+        strides_.insert(strides_.begin(), n);
+      }
+    }
+  }
+
+  const auto broadcast(const shape_type &target_shape) const {
+    if (target_shape.size() < dimension()) {
+      throw std::runtime_error("array: invalid shape for broadcast.");
+    } else if (target_shape.size() == dimension()) {
+      return *this;
+    }
+
+    auto diff = target_shape.size() - dimension();
+    for (size_t i = 0; i < dimension(); i++) {
+      if (shape(i) != target_shape[i + diff]) {
+        throw std::runtime_error("array: invalid shape for broadcast.");
+      }
+    }
+
+    array tmp = *this;
+    tmp.shape_ = target_shape;
+
+    // length
+    tmp.length_ = 1;
+    for (auto n : target_shape) {
+      tmp.length_ *= n;
+    }
+
+    // strides
+    tmp.strides_.clear();
+    tmp.strides_.push_back(1);
+    if (!strides_.empty()) {
+      for (int i = target_shape.size() - 1; i > 0; i--) {
+        auto n = i <= diff ? 0 : tmp.strides_.front() * target_shape[i];
+        tmp.strides_.insert(tmp.strides_.begin(), n);
+      }
+    }
+    return tmp;
   }
 
   //----------------------------------------------------------------------------
@@ -176,61 +248,173 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  T operator()() const { return *data(); }
+  T at() const { return *data(); }
 
-  T &operator()() { return *data(); }
+  T &at() { return *data(); }
 
-  T operator[](size_t i) const {
+  T at(size_t i) const {
     bounds_check_(i);
-    return data()[i];
+    return data()[i % buffer_length()];
   }
 
-  T &operator[](size_t i) {
+  T &at(size_t i) {
     bounds_check_(i);
-    return data()[i];
+    return data()[i % buffer_length()];
   }
 
-  T operator()(size_t row, size_t col) const {
-    // TODO: bounds check
-    // bounds_check_(row, col);
-    return data()[shape_[1] * row + col];
+  T at(size_t x, size_t y) const {
+    bounds_check_(x, y);
+    return data()[strides_[0] * x + y];
   }
 
-  T &operator()(size_t row, size_t col) {
-    // TODO: bounds check
-    // bounds_check_(row, col);
-    return data()[shape_[1] * row + col];
+  T &at(size_t x, size_t y) {
+    bounds_check_(x, y);
+    return data()[strides_[0] * x + y];
   }
 
-  T operator()(size_t x, size_t y, size_t z) const {
-    // TODO: bounds check
-    // bounds_check_(x, y, z);
-    return data()[(shape_[1] * shape_[2] * x) + (shape_[2] * y) + z];
+  T at(size_t x, size_t y, size_t z) const {
+    bounds_check_(x, y, z);
+    return data()[(strides_[0] * x) + (strides_[1] * y) + z];
   }
 
-  T &operator()(size_t x, size_t y, size_t z) {
-    // TODO: bounds check
-    // bounds_check_(x, y, z);
-    return data()[(shape_[1] * shape_[2] * x) + (shape_[2] * y) + z];
+  T &at(size_t x, size_t y, size_t z) {
+    bounds_check_(x, y, z);
+    return data()[(strides_[0] * x) + (strides_[1] * y) + z];
   }
 
   //----------------------------------------------------------------------------
 
-  using iterator = T *;
-  iterator begin() { return data(); }
-  iterator end() { return data() + length(); }
+  T operator[](size_t i) const { return at(i); }
 
-  using const_iterator = const T *;
-  const_iterator cbegin() const { return data(); }
-  const_iterator cend() const { return data() + length(); }
+  T &operator[](size_t i) { return at(i); }
+
+  //----------------------------------------------------------------------------
+
+  class iterator {
+   public:
+    using difference_type = std::ptrdiff_t;
+    using reference = T &;
+    using iterator_concept = std::forward_iterator_tag;
+
+    iterator(array *arr, size_t i) : arr_(arr), i_(i) {}
+
+    iterator &operator++() {
+      ++i_;
+      return *this;
+    }
+
+    iterator operator++(int) {
+      auto tmp = *this;
+      ++(*this);
+      return tmp;
+    }
+
+    reference &operator*() { return arr_->at(i_); }
+
+    friend bool operator==(const iterator &a, const iterator &b) {
+      return a.i_ == b.i_;
+    };
+
+   private:
+    array *arr_ = nullptr;
+    size_t i_ = 0;
+  };
+
+  iterator begin() { return iterator(this, 0); }
+  iterator end() { return iterator(this, length()); }
+
+  class const_iterator {
+   public:
+    using difference_type = std::ptrdiff_t;
+    using value_type = T;
+    using iterator_concept = std::forward_iterator_tag;
+
+    const_iterator(const array *arr, size_t i) : arr_(arr), i_(i) {}
+
+    const_iterator &operator++() {
+      ++i_;
+      return *this;
+    }
+
+    const_iterator operator++(int) {
+      auto tmp = *this;
+      ++(*this);
+      return tmp;
+    }
+
+    value_type operator*() const { return arr_->at(i_); }
+
+    friend bool operator==(const const_iterator &a, const const_iterator &b) {
+      return a.i_ == b.i_;
+    };
+
+   private:
+    const array *arr_ = nullptr;
+    size_t i_ = 0;
+  };
+
+  const_iterator cbegin() const { return const_iterator(this, 0); }
+  const_iterator cend() const { return const_iterator(this, length()); }
 
   //----------------------------------------------------------------------------
 
   void set(std::input_iterator auto b, std::input_iterator auto e) {
-    std::copy(b, e, data());
+    std::copy(b, e, begin());
   }
-  void set(std::ranges::input_range auto &&r) { std::ranges::copy(r, data()); }
-  void set(std::initializer_list<T> l) { std::ranges::copy(l, data()); }
+  void set(std::ranges::input_range auto &&r) { std::ranges::copy(r, begin()); }
+  void set(std::initializer_list<T> l) { std::ranges::copy(l, begin()); }
+
+  //----------------------------------------------------------------------------
+
+  friend auto operator+(const array &lhs, const array &rhs) {
+    return binary_operation_(lhs, rhs, Operation::Add);
+  }
+
+  friend auto operator-(const array &lhs, const array &rhs) {
+    return binary_operation_(lhs, rhs, Operation::Sub);
+  }
+
+  friend auto operator*(const array &lhs, const array &rhs) {
+    return binary_operation_(lhs, rhs, Operation::Mul);
+  }
+
+  friend auto operator/(const array &lhs, const array &rhs) {
+    return binary_operation_(lhs, rhs, Operation::Div);
+  }
+
+  //------------------------------------------------------------------------------
+
+  friend auto operator+(const array &lhs, auto rhs) {
+    return lhs + array(static_cast<T>(rhs));
+  }
+
+  friend auto operator+(auto lhs, const array &rhs) {
+    return array(static_cast<T>(lhs)) + rhs;
+  }
+
+  friend auto operator-(const array &lhs, auto rhs) {
+    return lhs - array(static_cast<T>(rhs));
+  }
+
+  friend auto operator-(auto lhs, const array &rhs) {
+    return array(static_cast<T>(lhs)) - rhs;
+  }
+
+  friend auto operator*(const array &lhs, auto rhs) {
+    return lhs * array(static_cast<T>(rhs));
+  }
+
+  friend auto operator*(auto lhs, const array &rhs) {
+    return array(static_cast<T>(lhs)) * rhs;
+  }
+
+  friend auto operator/(const array &lhs, auto rhs) {
+    return lhs / array(static_cast<T>(rhs));
+  }
+
+  friend auto operator/(auto lhs, const array &rhs) {
+    return array(static_cast<T>(lhs)) / rhs;
+  }
 
   //----------------------------------------------------------------------------
 
@@ -254,63 +438,31 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  array operator+(const array &rhs) const {
-    if constexpr (std::is_same_v<T, float>) {
-      return compute_(rhs, mtl::ComputeType::ARRAY_ADD_F);
-    } else if constexpr (std::is_same_v<T, int>) {
-      return compute_(rhs, mtl::ComputeType::ARRAY_ADD_I);
-    }
-  }
-
-  array operator-(const array &rhs) const {
-    if constexpr (std::is_same_v<T, float>) {
-      return compute_(rhs, mtl::ComputeType::ARRAY_SUB_F);
-    } else if constexpr (std::is_same_v<T, int>) {
-      return compute_(rhs, mtl::ComputeType::ARRAY_SUB_I);
-    }
-  }
-
-  array operator*(const array &rhs) const {
-    if constexpr (std::is_same_v<T, float>) {
-      return compute_(rhs, mtl::ComputeType::ARRAY_MUL_F);
-    } else if constexpr (std::is_same_v<T, int>) {
-      return compute_(rhs, mtl::ComputeType::ARRAY_MUL_I);
-    }
-  }
-
-  array operator/(const array &rhs) const {
-    if constexpr (std::is_same_v<T, float>) {
-      return compute_(rhs, mtl::ComputeType::ARRAY_DIV_F);
-    } else if constexpr (std::is_same_v<T, int>) {
-      return compute_(rhs, mtl::ComputeType::ARRAY_DIV_I);
-    }
-  }
-
   array dot(const array &rhs) const {
     // TODO: use GPU
     if (dimension() == 1 && rhs.dimension() == 1 && shape(0) == rhs.shape(0)) {
-      array<T> tmp(shape_type{});
+      auto tmp = array(shape_type{});
 
       T val = 0;
       for (size_t i = 0; i < shape(0); i++) {
-        val += (*this)[i] * rhs[i];
+        val += at(i) * rhs.at(i);
       }
-      tmp() = val;
+      tmp.at() = val;
       return tmp;
     }
 
     if (dimension() == 2 && rhs.dimension() == 2 && shape(1) == rhs.shape(0)) {
       auto rows = shape(0);
       auto cols = rhs.shape(1);
-      array<T> tmp(shape_type{rows, cols});
+      auto tmp = array(shape_type{rows, cols});
 
       for (size_t row = 0; row < rows; row++) {
         for (size_t col = 0; col < cols; col++) {
           T val = 0;
           for (size_t i = 0; i < shape(1); i++) {
-            val += (*this)(row, i) * rhs(i, col);
+            val += at(row, i) * rhs.at(i, col);
           }
-          tmp(row, col) = val;
+          tmp.at(row, col) = val;
         }
       }
       return tmp;
@@ -319,71 +471,33 @@ class array {
     if (dimension() == 1 && rhs.dimension() == 2 && shape(0) == rhs.shape(0)) {
       auto rows = 1;
       auto cols = rhs.shape(1);
-      array<T> tmp(shape_type{cols});
+      auto tmp = array(shape_type{cols});
 
       for (size_t col = 0; col < cols; col++) {
         T val = 0;
         for (size_t i = 0; i < shape(0); i++) {
-          val += (*this)[i] * rhs(i, col);
+          val += at(i) * rhs.at(i, col);
         }
-        tmp[col] = val;
+        tmp.at(col) = val;
       }
       return tmp;
     }
 
     if (dimension() == 2 && rhs.dimension() == 1 && shape(1) == rhs.shape(0)) {
       auto rows = shape(0);
-      array<T> tmp(shape_type{rows});
+      auto tmp = array(shape_type{rows});
 
       for (size_t row = 0; row < rows; row++) {
         T val = 0;
         for (size_t i = 0; i < shape(1); i++) {
-          val += (*this)(row, i) * rhs[i];
+          val += at(row, i) * rhs.at(i);
         }
-        tmp[row] = val;
+        tmp.at(row) = val;
       }
       return tmp;
     }
 
     throw std::runtime_error("array: can't do `dot` operation.");
-  }
-
-  //----------------------------------------------------------------------------
-
-  array operator+(T val) const {
-    // TODO: use GPU
-    array<T> tmp{*this};
-    for (auto &x : tmp) {
-      x += val;
-    }
-    return tmp;
-  }
-
-  array operator-(T val) const {
-    // TODO: use GPU
-    array<T> tmp{*this};
-    for (auto &x : tmp) {
-      x -= val;
-    }
-    return tmp;
-  }
-
-  array operator*(T val) const {
-    // TODO: use GPU
-    array<T> tmp{*this};
-    for (auto &x : tmp) {
-      x *= val;
-    }
-    return tmp;
-  }
-
-  array operator/(T val) const {
-    // TODO: use GPU
-    array<T> tmp{*this};
-    for (auto &x : tmp) {
-      x /= val;
-    }
-    return tmp;
   }
 
   //----------------------------------------------------------------------------
@@ -396,7 +510,7 @@ class array {
 
       auto it = cbegin();
       for (size_t col = 0; col < length(); col++) {
-        tmp(0, col) = *it;
+        tmp.at(0, col) = *it;
         ++it;
       }
       return tmp;
@@ -409,7 +523,7 @@ class array {
 
         auto it = cbegin();
         for (size_t row = 0; row < length(); row++) {
-          tmp(row, 0) = *it;
+          tmp.at(row, 0) = *it;
           ++it;
         }
         return tmp;
@@ -423,7 +537,7 @@ class array {
         auto it = cbegin();
         for (size_t col = 0; col < shape[1]; col++) {
           for (size_t row = 0; row < shape[0]; row++) {
-            tmp(row, col) = *it;
+            tmp.at(row, col) = *it;
             ++it;
           }
         }
@@ -442,7 +556,7 @@ class array {
       for (size_t z = 0; z < shape[2]; z++) {
         for (size_t y = 0; y < shape[1]; y++) {
           for (size_t x = 0; x < shape[0]; x++) {
-            tmp(x, y, z) = *it;
+            tmp.at(x, y, z) = *it;
             ++it;
           }
         }
@@ -464,42 +578,101 @@ class array {
 
  private:
   void allocate_buffer_() {
-    size_t length = 1;
+    size_t len = 1;
     for (auto n : shape_) {
-      length *= n;
+      len *= n;
     }
-    buf_ = mtl::newBuffer(sizeof(T) * length);
+    buf_ = mtl::newBuffer(sizeof(T) * len);
   }
 
-  template <typename U>
-  void allocate_buffer_and_copy_(const U &l) {
+  void allocate_buffer_and_copy_(const auto &l) {
     allocate_buffer_();
     if (nested_initializer_item_count_(l) != length()) {
-      throw std::runtime_error("array: Invalid initializer list.");
+      throw std::runtime_error("array: invalid initializer list.");
     }
     nested_initializer_copy_(data(), l);
   }
 
-  auto compute_(const array &rhs, mtl::ComputeType id) const {
-    if (shape() != rhs.shape()) {
-      throw std::runtime_error("array: Invalid operation.");
+  void copy_initializer_list_(const auto &l) {
+    if (nested_initializer_item_count_(l) != length()) {
+      throw std::runtime_error("array: invalid initializer list.");
     }
-
-    array tmp(shape_);
-    mtl::compute(buf_.get(), rhs.buf_.get(), tmp.buf_.get(), id, sizeof(T));
-    return tmp;
-  }
-
-  void bounds_check_(size_t i) const {
-    if (i >= length()) {
-      throw std::runtime_error("array: Index is out of bounds.");
-    }
+    nested_initializer_copy_(data(), l);
   }
 
   //----------------------------------------------------------------------------
 
-  shape_type shape_;
-  mtl::managed_ptr<MTL::Buffer> buf_;
+  void bounds_check_(size_t i) const {
+    if (strides_.empty() || i >= length()) {
+      throw std::runtime_error("array: index is out of bounds.");
+    }
+  }
+
+  void bounds_check_(size_t x, size_t y) const {
+    // TODO: implement
+  }
+
+  void bounds_check_(size_t x, size_t y, size_t z) const {
+    // TODO: implement
+  }
+
+  //----------------------------------------------------------------------------
+
+  static auto broadcast_(const array &lhs, const array &rhs, auto cb) {
+    if (lhs.shape() == rhs.shape()) {
+      return cb(lhs, rhs);
+    } else if (lhs.dimension() < rhs.dimension()) {
+      return cb(lhs.broadcast(rhs.shape()), rhs);
+    } else if (lhs.dimension() > rhs.dimension()) {
+      return cb(lhs, rhs.broadcast(lhs.shape()));
+    }
+    throw std::runtime_error("array: invalid operation.");
+  }
+
+  static auto gpu_binary_operation_(const array &lhs, const array &rhs,
+                                    Operation ope) {
+    return broadcast_(lhs, rhs, [ope](const auto &lhs, const auto &rhs) {
+      auto tmp = array(lhs.shape());
+      mtl::compute<T>(lhs.buf_, rhs.buf_, tmp.buf_, ope);
+      return tmp;
+    });
+  }
+
+  static auto cpu_binary_operation_(const array &lhs, const array &rhs,
+                                    Operation ope) {
+    return broadcast_(lhs, rhs, [ope](const auto &lhs, const auto &rhs) {
+      return [ope](auto cb) {
+        switch (ope) {
+          case Operation::Add:
+            return cb([](T lhs, T rhs) { return lhs + rhs; });
+          case Operation::Sub:
+            return cb([](T lhs, T rhs) { return lhs - rhs; });
+          case Operation::Mul:
+            return cb([](T lhs, T rhs) { return lhs * rhs; });
+          case Operation::Div:
+            return cb([](T lhs, T rhs) { return lhs / rhs; });
+        }
+      }([&](auto fn) {
+        auto tmp = array(lhs.shape());
+        for (size_t i = 0; i < lhs.length(); i++) {
+          tmp[i] = fn(lhs[i], rhs[i]);
+        }
+        return tmp;
+      });
+    });
+  }
+
+  //----------------------------------------------------------------------------
+
+  static auto binary_operation_(const array &lhs, const array &rhs,
+                                Operation ope) {
+    switch (device) {
+      case Device::GPU:
+        return gpu_binary_operation_(lhs, rhs, ope);
+      case Device::CPU:
+        return cpu_binary_operation_(lhs, rhs, ope);
+    }
+  }
 };
 
 //------------------------------------------------------------------------------
@@ -512,7 +685,7 @@ inline size_t print(std::ostream &os, const array<T> &arr, size_t dim,
       if (i > 0) {
         os << ' ';
       }
-      os << arr[arr_index];
+      os << arr.at(arr_index);
     }
     return arr_index;
   }
@@ -535,27 +708,13 @@ inline size_t print(std::ostream &os, const array<T> &arr, size_t dim,
 template <typename T>
 inline std::ostream &operator<<(std::ostream &os, const array<T> &arr) {
   if (arr.dimension() == 0) {
-    os << arr();
+    os << arr.at();
   } else {
     os << "[";
     print(os, arr, 0, 0);
     os << "]";
   }
   return os;
-}
-
-//------------------------------------------------------------------------------
-
-template <typename T>
-inline auto scalar() {
-  return array<T>({});
-}
-
-template <typename T>
-inline auto scalar(T val) {
-  auto tmp = array<T>(shape_type{});
-  tmp() = val;
-  return tmp;
 }
 
 //------------------------------------------------------------------------------

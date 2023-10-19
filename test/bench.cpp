@@ -24,8 +24,7 @@ void bench_comparison_between_gpu_and_cpu() {
   auto out = mtl::newBuffer(sizeof(float) * length);
 
   Bench().epochs(epochs).run("GPU add", [&] {
-    mtl::compute(a.get(), b.get(), out.get(), mtl::ComputeType::ARRAY_ADD_F,
-                 sizeof(float));
+    mtl::compute<float>(a, b, out, mtl::Operation::Add);
   });
 
   Bench().epochs(epochs).run("CPU add", [&] {
@@ -37,15 +36,20 @@ void bench_comparison_between_gpu_and_cpu() {
 
 void bench_array_operations() {
   size_t epochs = 10;
-  const size_t length = 100'000'000;
+  const size_t length = 10'000'000;
 
   auto a = random<float>(length);
   auto b = random<float>(length);
   auto out = random<float>(length);
 
-  Bench().epochs(epochs).run("ones", [&] { ones<float>(length); });
-  Bench().epochs(epochs).run("random", [&] { random<float>(length); });
-  Bench().epochs(epochs).run("a + b", [&] { a + b; });
+  mtl::device = Device::GPU;
+  Bench().epochs(epochs).run("GPU a + b", [&] { a + b; });
+
+  mtl::device = Device::CPU;
+  Bench().epochs(epochs).run("CPU a + b", [&] { a + b; });
+
+  mtl::device = Device::CPU;
+  Bench().epochs(epochs).run("CPU ones", [&] { ones<float>(length); });
 }
 
 int main(void) {
