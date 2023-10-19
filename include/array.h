@@ -152,7 +152,7 @@ class array {
       }
       // TODO: use GPU
       for (size_t i = 0; i < length(); i++) {
-        if (at(i) != rhs.at(i)) {
+        if (!equal_value(at(i), rhs.at(i))) {
           return false;
         }
       }
@@ -577,6 +577,12 @@ class array {
   }
 
  private:
+  bool equal_value(float a, float b) const { return std::abs(a - b) < 1e-4; }
+
+  bool equal_value(int a, int b) const { return a == b; }
+
+  //----------------------------------------------------------------------------
+
   void allocate_buffer_() {
     size_t len = 1;
     for (auto n : shape_) {

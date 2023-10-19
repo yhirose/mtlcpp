@@ -8,14 +8,15 @@
 using namespace mtl;
 
 template <typename T, typename U>
-bool verify(const array<T> &A, const array<T> &B, const array<T> &OUT, U fn) {
-  return verify(A.data(), B.data(), OUT.data(), A.length(), fn);
+bool verify_array(const array<T> &A, const array<T> &B, const array<T> &OUT,
+                  U fn) {
+  return verify_array(A.data(), B.data(), OUT.data(), A.length(), fn);
 }
 
 template <typename T, typename U>
-bool verify_tolerant(const array<T> &A, const array<T> &B, const array<T> &OUT,
-                     U fn) {
-  return verify_tolerant(A.data(), B.data(), OUT.data(), A.length(), fn);
+bool verify_array_tolerant(const array<T> &A, const array<T> &B,
+                           const array<T> &OUT, U fn) {
+  return verify_array_tolerant(A.data(), B.data(), OUT.data(), A.length(), fn);
 }
 
 //------------------------------------------------------------------------------
@@ -86,20 +87,20 @@ TEST_CASE("vector: arithmatic operations") {
 
   auto out = a + b;
   CHECK(out.length() == length);
-  CHECK(verify<float>(a, b, out, [](auto a, auto b) { return a + b; }));
+  CHECK(verify_array<float>(a, b, out, [](auto a, auto b) { return a + b; }));
 
   out = a - b;
   CHECK(out.length() == length);
-  CHECK(verify<float>(a, b, out, [](auto a, auto b) { return a - b; }));
+  CHECK(verify_array<float>(a, b, out, [](auto a, auto b) { return a - b; }));
 
   out = a * b;
   CHECK(out.length() == length);
-  CHECK(verify<float>(a, b, out, [](auto a, auto b) { return a * b; }));
+  CHECK(verify_array<float>(a, b, out, [](auto a, auto b) { return a * b; }));
 
   out = a / b;
   CHECK(out.length() == length);
-  CHECK(
-      verify_tolerant<float>(a, b, out, [](auto a, auto b) { return a / b; }));
+  CHECK(verify_array_tolerant<float>(a, b, out,
+                                     [](auto a, auto b) { return a / b; }));
 }
 
 TEST_CASE("vector: arithmatic operation errors") {
