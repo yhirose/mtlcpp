@@ -46,16 +46,20 @@ TEST_CASE("testing basic operations") {
   random<float>(A);
   random<float>(B);
 
-  mtl.compute<float>(A.get(), B.get(), OUT.get(), Operation::Add);
+  mtl.compute<float>(A.get(), 0, A->length(), B.get(), 0, B->length(), OUT.get(),
+                     0, OUT->length(), Operation::Add);
   CHECK(verify_array<float>(A, B, OUT, [](auto a, auto b) { return a + b; }));
 
-  mtl.compute<float>(A.get(), B.get(), OUT.get(), Operation::Sub);
+  mtl.compute<float>(A.get(), 0, A->length(), B.get(), 0, B->length(), OUT.get(),
+                     0, OUT->length(), Operation::Sub);
   CHECK(verify_array<float>(A, B, OUT, [](auto a, auto b) { return a - b; }));
 
-  mtl.compute<float>(A.get(), B.get(), OUT.get(), Operation::Mul);
+  mtl.compute<float>(A.get(), 0, A->length(), B.get(), 0, B->length(), OUT.get(),
+                     0, OUT->length(), Operation::Mul);
   CHECK(verify_array<float>(A, B, OUT, [](auto a, auto b) { return a * b; }));
 
-  mtl.compute<float>(A.get(), B.get(), OUT.get(), Operation::Div);
+  mtl.compute<float>(A.get(), 0, A->length(), B.get(), 0, B->length(), OUT.get(),
+                     0, OUT->length(), Operation::Div);
   CHECK(verify_array_tolerant<float>(A, B, OUT,
                                      [](auto a, auto b) { return a / b; }));
 }

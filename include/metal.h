@@ -36,7 +36,10 @@ class metal {
   managed_ptr<MTL::Buffer> newBuffer(NS::UInteger length);
 
   template <value_type T>
-  void compute(MTL::Buffer* A, MTL::Buffer* B, MTL::Buffer* OUT, Operation ope);
+  void compute(MTL::Buffer* A, size_t A_offset, uint32_t A_bytes,
+               MTL::Buffer* B, size_t B_offset, uint32_t B_bytes,
+               MTL::Buffer* OUT, size_t OUT_offset, uint32_t OUT_bytes,
+               Operation ope);
 
  private:
   MTL::Device* device_;
@@ -221,27 +224,27 @@ inline managed_ptr<MTL::Buffer> metal::newBuffer(NS::UInteger length) {
 }
 
 template <value_type T>
-inline void metal::compute(MTL::Buffer* A, MTL::Buffer* B, MTL::Buffer* OUT,
-                           Operation ope) {
+inline void metal::compute(MTL::Buffer* A, size_t A_offset, uint32_t A_bytes,
+                           MTL::Buffer* B, size_t B_offset, uint32_t B_bytes,
+                           MTL::Buffer* OUT, size_t OUT_offset,
+                           uint32_t OUT_bytes, Operation ope) {
   auto commandBuffer = queue_->commandBuffer();
   auto computeEncoder = commandBuffer->computeCommandEncoder();
 
   auto pso = states_[static_cast<size_t>(ope)];
-  uint32_t a_bytes = A->length();
-  uint32_t b_bytes = B->length();
   auto dtype = std::is_same_v<T, float>
                    ? static_cast<uint32_t>(DataType::Float)
                    : static_cast<uint32_t>(DataType::Integer);
 
   computeEncoder->setComputePipelineState(pso.get());
-  computeEncoder->setBuffer(A, 0, 0);
-  computeEncoder->setBuffer(B, 0, 1);
-  computeEncoder->setBuffer(OUT, 0, 2);
-  computeEncoder->setBytes(&a_bytes, sizeof(uint32_t), 3);
-  computeEncoder->setBytes(&b_bytes, sizeof(uint32_t), 4);
+  computeEncoder->setBuffer(A, A_offset, 0);
+  computeEncoder->setBuffer(B, B_offset, 1);
+  computeEncoder->setBuffer(OUT, OUT_offset, 2);
+  computeEncoder->setBytes(&A_bytes, sizeof(uint32_t), 3);
+  computeEncoder->setBytes(&B_bytes, sizeof(uint32_t), 4);
   computeEncoder->setBytes(&dtype, sizeof(uint32_t), 5);
 
-  auto length = OUT->length() / sizeof(T);
+  auto length = OUT_bytes / sizeof(T);
   auto grid_size = MTL::Size::Make(length, 1, 1);
   auto threads_size = std::min(pso->maxTotalThreadsPerThreadgroup(), length);
 
@@ -290,9 +293,14 @@ inline managed_ptr<MTL::Buffer> newBuffer(NS::UInteger length) {
 }
 
 template <typename T>
-inline void compute(managed_ptr<MTL::Buffer> A, managed_ptr<MTL::Buffer> B,
-                    managed_ptr<MTL::Buffer> OUT, Operation ope) {
-  return singleton_instance_().compute<T>(A.get(), B.get(), OUT.get(), ope);
+inline void compute(managed_ptr<MTL::Buffer> A, size_t A_offset,
+                    uint32_t A_bytes, managed_ptr<MTL::Buffer> B,
+                    size_t B_offset, uint32_t B_bytes,
+                    managed_ptr<MTL::Buffer> OUT, size_t OUT_offset,
+                    uint32_t OUT_bytes, Operation ope) {
+  return singleton_instance_().compute<T>(
+      A.get(), A_offset, A->length(), B.get(), B_offset, B->length(), OUT.get(),
+      OUT_offset, OUT->length(), ope);
 }
-};  // namespace mtl
 
+};  // namespace mtl
