@@ -17,8 +17,10 @@ make test && ./test
 
 ## Benchmark
 
+The benchmark provides a comparison with the Eigen and xtensor libraries.
+
 ```
-brew install eigen
+brew install eigen xtensor
 
 cd test
 make bench && ./bench
