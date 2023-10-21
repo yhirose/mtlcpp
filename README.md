@@ -18,6 +18,15 @@ make test && ./test
 ## Benchmark
 
 ```
+brew install eigen
+
 cd test
 make bench && ./bench
+```
+
+## MNIST example
+
+```
+cd test
+make mnist && ./bench
 ```

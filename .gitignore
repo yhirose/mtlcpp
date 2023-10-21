@@ -3,4 +3,5 @@
 metal-cpp/*
 test/test
 test/bench
+test/mnist
 misc/

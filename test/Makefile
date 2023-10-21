@@ -5,21 +5,22 @@ CXXFLAGS = -std=c++20 -O2 -I$(METAL_CPP_DIR) -I../include -framework Foundation 
 
 INC = ../include/metal.h ../include/compute.h ../include/array.h
 
-TEST_INC = utils.h
 TEST_SRC = test_metal.cpp test_array.cpp test_perceptron.cpp test.cpp
-
 BENCH_SRC = bench.cpp
+MNIST_SRC = mnist.cpp
 
-all : test bench
-	./test
-	./bench
+all : test bench mnist
+	./test && ./bench && ./mnist
 
-test : $(INC) $(TEST_INC) $(TEST_SRC) Makefile
+test : $(INC) $(TEST_SRC) Makefile
 	$(CXX) -o $@ $(CXXFLAGS) $(TEST_SRC)
 
 bench : $(INC) $(BENCH_SRC) Makefile
 	$(CXX) -o $@ $(CXXFLAGS) $(BENCH_SRC)
 
+mnist : $(INC) $(MNIST_SRC) Makefile
+	$(CXX) -o $@ $(CXXFLAGS) $(MNIST_SRC)
+
 clean:
-	rm -rf test bench
+	rm -rf test bench mnist
 

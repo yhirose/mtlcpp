@@ -3,7 +3,9 @@
 #include <metal.h>
 
 #include <concepts>
+#include <iostream>
 #include <iterator>
+#include <limits>
 #include <ranges>
 
 namespace mtl {
@@ -108,9 +110,10 @@ class array {
   size_t buf_len_ = 0;
 
  public:
+  array() = default;
   array(array &&rhs) = default;
-  array(const array &rhs) = default;             // TODO: use GPU
-  array &operator=(const array &rhs) = default;  // TODO: use GPU
+  array(const array &rhs) = default;
+  array &operator=(const array &rhs) = default;
 
   array(const shape_type &shape) {
     reshape(shape);
@@ -138,63 +141,60 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  auto clone() const {
-    array tmp(shape_);
-    // TODO: use GPU
+  template <value_type U = T>
+  array<U> clone() const {
+    array<U> tmp(shape_);
     for (size_t i = 0; i < element_count(); i++) {
-      tmp.at(i) = at(i);
+      tmp.at(i) = static_cast<U>(at(i));
     }
     return tmp;
   }
 
   //----------------------------------------------------------------------------
 
-  auto operator==(const array &rhs) const {
-    if (this != &rhs) {
-      if (shape_ != rhs.shape_) {
-        return false;
-      }
-      // TODO: use GPU
-      for (size_t i = 0; i < element_count(); i++) {
-        if (!equal_value_(at(i), rhs.at(i))) {
-          return false;
-        }
-      }
+  array<bool> operator==(const array &rhs) const {
+    array<bool> tmp(shape_);
+    for (size_t i = 0; i < element_count(); i++) {
+      tmp.at(i) = at(i) == rhs.at(i);
     }
-    return true;
+    return tmp;
   }
 
   //----------------------------------------------------------------------------
 
-  auto buffer_element_count() const { return buf_len_; }
+  size_t buffer_element_count() const { return buf_len_; }
 
-  auto buffer_bytes() const { return buf_len_ * sizeof(T); }
+  size_t buffer_bytes() const { return buf_len_ * sizeof(T); }
 
-  auto buffer_data() { return static_cast<T *>(buf_->contents()) + buf_off_; }
+  T *buffer_data() { return static_cast<T *>(buf_->contents()) + buf_off_; }
 
-  auto buffer_data() const {
+  const T *buffer_data() const {
     return static_cast<const T *>(buf_->contents()) + buf_off_;
   }
 
   //----------------------------------------------------------------------------
 
-  auto element_count() const {
+  size_t element_count() const {
     // TODO: cache
-    return element_count_from_shape_(shape_);
+    size_t count = 1;
+    for (auto n : shape_) {
+      count *= n;
+    }
+    return count;
   }
 
-  auto length() const {
+  size_t length() const {
     if (shape_.empty()) {
       throw std::runtime_error("array: cannot call with a scalar value.");
     }
     return shape_[0];
   }
 
-  auto dimension() const { return shape_.size(); }
+  size_t dimension() const { return shape_.size(); }
 
-  const auto &shape() const { return shape_; }
+  const shape_type &shape() const { return shape_; }
 
-  const auto &strides() const { return strides_; }
+  const strides_type &strides() const { return strides_; }
 
   void reshape(const shape_type &shape) {
     // TODO: check the shape
@@ -242,46 +242,60 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  auto at() const { return *buffer_data(); }
+  T at() const { return *buffer_data(); }
 
-  auto &at() { return *buffer_data(); }
+  T &at() { return *buffer_data(); }
 
-  auto at(size_t i) const {
+  T at(size_t i) const {
     bounds_check_(i);
     return buffer_data()[i % buffer_element_count()];
   }
 
-  auto &at(size_t i) {
+  T &at(size_t i) {
     bounds_check_(i);
     return buffer_data()[i % buffer_element_count()];
   }
 
-  auto at(size_t x, size_t y) const {
+  T at(size_t x, size_t y) const {
     bounds_check_(x, y);
     return buffer_data()[strides_[0] * x + y];
   }
 
-  auto &at(size_t x, size_t y) {
+  T &at(size_t x, size_t y) {
     bounds_check_(x, y);
     return buffer_data()[strides_[0] * x + y];
   }
 
-  auto at(size_t x, size_t y, size_t z) const {
+  T at(size_t x, size_t y, size_t z) const {
     bounds_check_(x, y, z);
     return buffer_data()[(strides_[0] * x) + (strides_[1] * y) + z];
   }
 
-  auto &at(size_t x, size_t y, size_t z) {
+  T &at(size_t x, size_t y, size_t z) {
     bounds_check_(x, y, z);
     return buffer_data()[(strides_[0] * x) + (strides_[1] * y) + z];
   }
 
-  operator T() const { return at(); }
+  T at(const std::vector<size_t> &position) const {
+    // TODO: bounds_check_(position);
+    size_t buffer_index = 0;
+    for (size_t i = 0; i < position.size(); i++) {
+      buffer_index += strides_[i] * position[i];
+    }
+    return buffer_data()[buffer_index];
+  }
 
-  operator T &() { return at(); }
+  T &at(const std::vector<size_t> &position) {
+    // TODO: bounds_check_(position);
+    size_t buffer_index = 0;
+    for (size_t i = 0; i < position.size(); i++) {
+      buffer_index += strides_[i] * position[i];
+    }
+    return buffer_data()[buffer_index];
+  }
 
   template <size_t I>
-  constexpr auto take() const {
+  auto take() const {
     if constexpr (I == 0) {
       return std::tuple<>();
     } else {
@@ -292,7 +306,7 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  auto operator()(size_t row) const {
+  array operator[](size_t row) const {
     if (dimension() == 0 || row >= shape_[0]) {
       throw std::runtime_error("array: row is out of bounds.");
     }
@@ -381,6 +395,27 @@ class array {
     return const_element_iterator(this, element_count());
   }
 
+  struct element_range {
+    element_range(array *arr) : arr_(arr) {}
+    auto begin() { return element_iterator(arr_, 0); }
+    auto end() { return element_iterator(arr_, arr_->element_count()); }
+    array *arr_ = nullptr;
+  };
+
+  struct const_element_range {
+    const_element_range(const array *arr) : arr_(arr) {}
+    auto begin() { return const_element_iterator(arr_, 0); }
+    auto end() { return const_element_iterator(arr_, arr_->element_count()); }
+    auto cbegin() const { return const_element_iterator(arr_, 0); }
+    auto cend() const {
+      return const_element_iterator(arr_, arr_->element_count());
+    }
+    const array *arr_ = nullptr;
+  };
+
+  auto elements() { return element_range(this); }
+  auto elements() const { return const_element_range(this); }
+
   //----------------------------------------------------------------------------
 
   class row_iterator {
@@ -402,7 +437,7 @@ class array {
       return tmp;
     }
 
-    value_type operator*() { return (*arr_)(i_); }
+    value_type operator*() { return (*arr_)[i_]; }
 
     friend bool operator==(const row_iterator &a, const row_iterator &b) {
       return a.i_ == b.i_;
@@ -432,7 +467,7 @@ class array {
       return tmp;
     }
 
-    value_type operator*() const { return (*arr_)(i_); }
+    value_type operator*() const { return (*arr_)[i_]; }
 
     friend bool operator==(const const_row_iterator &a,
                            const const_row_iterator &b) {
@@ -444,15 +479,7 @@ class array {
     size_t i_ = 0;
   };
 
-  auto begin() { return row_iterator(this, 0); }
-  auto end() { return row_iterator(this, shape_[0]); }
-
-  auto cbegin() const { return const_row_iterator(this, 0); }
-  auto cend() const { return const_row_iterator(this, shape_[0]); }
-
-  //----------------------------------------------------------------------------
-
-  template <size_t I>
+  template <size_t N>
   class row_tuple_iterator {
    public:
     using difference_type = std::ptrdiff_t;
@@ -472,7 +499,7 @@ class array {
       return tmp;
     }
 
-    auto operator*() const { return (*arr_)(i_).template take<I>(); }
+    auto operator*() const { return (*arr_)[i_].template take<N>(); }
 
     friend bool operator==(const row_tuple_iterator &a,
                            const row_tuple_iterator &b) {
@@ -484,7 +511,7 @@ class array {
     size_t i_ = 0;
   };
 
-  template <size_t I>
+  template <size_t N>
   class const_row_tuple_iterator {
    public:
     using difference_type = std::ptrdiff_t;
@@ -503,7 +530,7 @@ class array {
       return tmp;
     }
 
-    auto operator*() const { return (*arr_)(i_).template take<I>(); }
+    auto operator*() const { return (*arr_)(i_).template take<N>(); }
 
     friend bool operator==(const const_row_tuple_iterator &a,
                            const const_row_tuple_iterator &b) {
@@ -515,34 +542,74 @@ class array {
     size_t i_ = 0;
   };
 
-  template <size_t I>
-  struct row_tuple_range {
-    row_tuple_range(array *arr) : arr_(arr) {}
-    auto begin() { return row_tuple_iterator<I>(arr_, 0); }
-    auto end() { return row_tuple_iterator<I>(arr_, arr_->shape()[0]); }
+  auto begin() { return row_iterator(this, 0); }
+  auto end() { return row_iterator(this, shape_[0]); }
+
+  auto begin() const { return const_row_iterator(this, 0); }
+  auto end() const { return const_row_iterator(this, shape_[0]); }
+
+  auto cbegin() const { return const_row_iterator(this, 0); }
+  auto cend() const { return const_row_iterator(this, shape_[0]); }
+
+  struct row_range {
+    row_range(array *arr) : arr_(arr) {}
+    auto begin() { return row_iterator(arr_, 0); }
+    auto end() { return row_iterator(arr_, arr_->shape()[0]); }
     array *arr_ = nullptr;
   };
 
-  template <size_t I>
-  struct const_row_tuple_range {
-    const_row_tuple_range(array *arr) : arr_(arr) {}
-    auto begin() const { return row_tuple_iterator<I>(arr_, 0); }
-    auto end() const { return row_tuple_iterator<I>(arr_, arr_->shape()[0]); }
+  struct const_row_range {
+    const_row_range(const array *arr) : arr_(arr) {}
+    auto begin() const { return const_row_iterator(arr_, 0); }
+    auto end() const { return const_row_iterator(arr_, arr_->shape()[0]); }
+    auto cbegin() const { return const_row_iterator(arr_, 0); }
+    auto cend() const { return const_row_iterator(arr_, arr_->shape()[0]); }
     const array *arr_ = nullptr;
   };
 
-  template <size_t I>
+  template <size_t N>
+  struct row_tuple_range {
+    row_tuple_range(array *arr) : arr_(arr) {}
+    auto begin() { return row_tuple_iterator<N>(arr_, 0); }
+    auto end() { return row_tuple_iterator<N>(arr_, arr_->shape()[0]); }
+    array *arr_ = nullptr;
+  };
+
+  template <size_t N>
+  struct const_row_tuple_range {
+    const_row_tuple_range(array *arr) : arr_(arr) {}
+    auto cbegin() const { return const_row_tuple_iterator<N>(arr_, 0); }
+    auto cend() const {
+      return const_row_tuple_iterator<N>(arr_, arr_->shape()[0]);
+    }
+    const array *arr_ = nullptr;
+  };
+
+  template <size_t N = 0>
   auto rows() {
-    return row_tuple_range<I>(this);
+    if constexpr (N == 0) {
+      return row_range(this);
+    } else {
+      return row_tuple_range<N>(this);
+    }
   }
 
-  template <size_t I>
+  template <size_t N = 0>
   auto rows() const {
-    return const_row_tuple_range<I>(this);
+    if constexpr (N == 0) {
+      return const_row_range(this);
+    } else {
+      return const_row_tuple_range<N>(this);
+    }
   }
 
   //----------------------------------------------------------------------------
 
+  void set(std::input_iterator auto it) {
+    for (size_t i = 0; i < element_count(); i++) {
+      at(i) = *it++;
+    }
+  }
   void set(std::ranges::input_range auto &&r) {
     std::ranges::copy(r, element_begin());
   }
@@ -552,60 +619,99 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  friend auto operator+(const array &lhs, const array &rhs) {
+  friend array operator+(const array &lhs, const array &rhs) {
     return binary_operation_(lhs, rhs, Operation::Add);
   }
 
-  friend auto operator-(const array &lhs, const array &rhs) {
+  friend array operator-(const array &lhs, const array &rhs) {
     return binary_operation_(lhs, rhs, Operation::Sub);
   }
 
-  friend auto operator*(const array &lhs, const array &rhs) {
+  friend array operator*(const array &lhs, const array &rhs) {
     return binary_operation_(lhs, rhs, Operation::Mul);
   }
 
-  friend auto operator/(const array &lhs, const array &rhs) {
+  friend array operator/(const array &lhs, const array &rhs) {
     return binary_operation_(lhs, rhs, Operation::Div);
   }
 
   //------------------------------------------------------------------------------
 
-  friend auto operator+(const array &lhs, auto rhs) {
+  friend array operator+(const array &lhs, auto rhs) {
     return lhs + array(static_cast<T>(rhs));
   }
 
-  friend auto operator+(auto lhs, const array &rhs) {
+  friend array operator+(auto lhs, const array &rhs) {
     return array(static_cast<T>(lhs)) + rhs;
   }
 
-  friend auto operator-(const array &lhs, auto rhs) {
+  friend array operator-(const array &lhs, auto rhs) {
     return lhs - array(static_cast<T>(rhs));
   }
 
-  friend auto operator-(auto lhs, const array &rhs) {
+  friend array operator-(auto lhs, const array &rhs) {
     return array(static_cast<T>(lhs)) - rhs;
   }
 
-  friend auto operator*(const array &lhs, auto rhs) {
+  friend array operator*(const array &lhs, auto rhs) {
     return lhs * array(static_cast<T>(rhs));
   }
 
-  friend auto operator*(auto lhs, const array &rhs) {
+  friend array operator*(auto lhs, const array &rhs) {
     return array(static_cast<T>(lhs)) * rhs;
   }
 
-  friend auto operator/(const array &lhs, auto rhs) {
+  friend array operator/(const array &lhs, auto rhs) {
     return lhs / array(static_cast<T>(rhs));
   }
 
-  friend auto operator/(auto lhs, const array &rhs) {
+  friend array operator/(auto lhs, const array &rhs) {
     return array(static_cast<T>(lhs)) / rhs;
   }
 
   //----------------------------------------------------------------------------
 
+  std::string print_shape() const {
+    std::stringstream ss;
+    ss << "(";
+    for (size_t i = 0; i < shape_.size(); i++) {
+      if (i != 0) {
+        ss << ":";
+      }
+      ss << shape_[i];
+    }
+    ss << ")";
+    return ss.str();
+  }
+
+  std::string print_data_type() const {
+    if constexpr (std::is_same_v<T, float>) {
+      return "<float>";
+    } else {
+      return "<int>";
+    }
+  }
+
+  std::string print_info() const {
+    std::stringstream ss;
+    ss << "dimension: " << dimension() << ", shape: " << print_shape()
+       << ", dtype: " << print_data_type();
+    return ss.str();
+  }
+
+  std::string print_array_numpy_format() const {
+    std::string delims = " []";
+    return print_array_(delims);
+  }
+
+  std::string print_array_cpp_format() const {
+    std::string delims = ",{}";
+    return print_array_(delims);
+  }
+
+  //----------------------------------------------------------------------------
+
   void constants(T val) {
-    // TODO: use GPU
     std::fill(buffer_data(), buffer_data() + buffer_element_count(), val);
   }
 
@@ -614,16 +720,14 @@ class array {
   void ones() { constants(1); };
 
   void random() {
-    // TODO: use GPU
     std::generate(buffer_data(), buffer_data() + buffer_element_count(), []() {
-      return static_cast<T>(static_cast<double>(rand()) / RAND_MAX);
+      return static_cast<float>(static_cast<double>(rand()) / RAND_MAX);
     });
   }
 
   //----------------------------------------------------------------------------
 
   array dot(const array &rhs) const {
-    // TODO: use GPU
     if (dimension() == 1 && rhs.dimension() == 1 &&
         shape_[0] == rhs.shape_[0]) {
       auto tmp = array(shape_type{});
@@ -690,8 +794,7 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  auto transpose() const {
-    // TODO: use GPU
+  array transpose() const {
     if (dimension() == 1) {
       auto tmp = clone();
       tmp.reshape({1, element_count()});
@@ -757,36 +860,151 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  auto sum() const {
-    return std::accumulate(element_cbegin(), element_cend(), 0);
+  array sigmoid() const {
+    array<float> tmp(shape_);
+    for (size_t i = 0; i < element_count(); i++) {
+      tmp.at(i) = 1.0 / (1.0 + std::exp(-static_cast<float>(at(i))));
+    }
+    return tmp;
   }
 
-  template <typename U = float>
-  auto mean() const {
-    return std::accumulate(element_cbegin(), element_cend(), 0) /
-           static_cast<U>(element_count());
+  //----------------------------------------------------------------------------
+
+  float sum() const {
+    return std::accumulate(element_cbegin(), element_cend(), T{});
+  }
+
+  array sum(size_t axis) const {
+    auto s = shape_;
+    s.erase(s.begin() + axis);
+
+    auto tmp = array(s);
+
+    enumerate_position_([&](const auto &pos) {
+      auto p = pos;
+      p.erase(p.begin() + axis);
+
+      tmp.at(p) += at(pos);
+    });
+
+    return tmp;
+  }
+
+  float mean() const { return sum() / static_cast<float>(element_count()); }
+
+  array<float> mean(size_t axis) const {
+    auto t = sum(axis);
+    if constexpr (std::is_same_v<T, float>) {
+      return t / shape_[axis];
+    } else {
+      return t.template clone<float>() / shape_[axis];
+    }
+  }
+
+  T min() const {
+    T min_val = std::numeric_limits<T>::max();
+    for (size_t i = 0; i < buffer_element_count(); i++) {
+      auto val = buffer_data()[i];
+      if (val < min_val) {
+        min_val = val;
+      }
+    }
+    return min_val;
+  }
+
+  T max() const {
+    T max_val = std::numeric_limits<T>::min();
+    for (size_t i = 0; i < buffer_element_count(); i++) {
+      auto val = buffer_data()[i];
+      if (val > max_val) {
+        max_val = val;
+      }
+    }
+    return max_val;
+  }
+
+  template <typename U>
+  bool all(U fn) const {
+    for (size_t i = 0; i < buffer_element_count(); i++) {
+      auto val = buffer_data()[i];
+      if (!fn(val)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  size_t count() const {
+    size_t cnt = 0;
+    for (size_t i = 0; i < element_count(); i++) {
+      if (at(i)) {
+        cnt++;
+      }
+    }
+    return cnt;
+  }
+
+  array<float> softmax() const {
+    if (dimension() == 1) {
+      auto c = min();
+      auto tmp = array<float>{shape_};
+
+      for (size_t i = 0; i < element_count(); i++) {
+        tmp.at(i) = std::exp(at(i) - c);
+      }
+      return tmp / tmp.sum();
+    } else if (dimension() == 2) {
+      auto tmp = array<float>{shape_};
+
+      for (size_t i = 0; i < shape_[0]; i++) {
+        const auto row = (*this)[i];
+        auto c = row.min();
+        for (size_t j = 0; j < row.element_count(); j++) {
+          tmp[i].at(j) = std::exp(row.at(j) - c);
+        }
+        auto smax = tmp[i] / tmp[i].sum();
+
+        for (size_t j = 0; j < row.element_count(); j++) {
+          tmp[i].at(j) = smax.at(j);
+        }
+      }
+      return tmp;
+    }
+
+    throw std::runtime_error(
+        "array: softmax is available only for 1 or 2 dimension array.");
+  }
+
+  auto argmax() const {
+    if (dimension() == 2) {
+      auto row_count = shape_[0];
+      auto tmp = array<int>(shape_type{row_count});
+
+      for (size_t i = 0; i < row_count; i++) {
+        const auto row = (*this)[i];
+
+        size_t max_index = 0;
+        {
+          T max_val = std::numeric_limits<T>::min();
+          for (size_t j = 0; j < row.buffer_element_count(); j++) {
+            auto val = row.buffer_data()[j];
+            if (val > max_val) {
+              max_val = val;
+              max_index = j;
+            }
+          }
+        }
+
+        tmp.at(i) = max_index;
+      }
+      return tmp;
+    }
+
+    throw std::runtime_error(
+        "array: argmax is available for 2 dimension array.");
   }
 
  private:
-  auto element_count_from_shape_(const shape_type &shape) const {
-    size_t count = 1;
-    for (auto n : shape) {
-      count *= n;
-    }
-    return count;
-  }
-
-  //----------------------------------------------------------------------------
-
-  auto equal_value_(float a, float b) const {
-    // NOTE: is `1e-3` too large?
-    return std::abs(a - b) < 1e-3;
-  }
-
-  auto equal_value_(int a, int b) const { return a == b; }
-
-  //----------------------------------------------------------------------------
-
   void allocate_buffer_() {
     buf_off_ = 0;
     buf_len_ = element_count();
@@ -819,6 +1037,76 @@ class array {
         z >= shape_[2]) {
       throw std::runtime_error("array: (x, y, z) is out of bounds.");
     }
+  }
+
+  //----------------------------------------------------------------------------
+
+  template <typename U>
+  void enumerate_position_(size_t shape_index, std::vector<size_t> &position,
+                           U fn) const {
+    if (shape_index == shape_.size()) {
+      fn(position);
+      return;
+    }
+
+    for (size_t i = 0; i < shape_[shape_index]; i++) {
+      position[shape_index] = i;
+      enumerate_position_(shape_index + 1, position, fn);
+    }
+  }
+
+  template <typename U>
+  void enumerate_position_(U fn) const {
+    std::vector<size_t> position(shape_.size());
+    for (size_t i = 0; i < shape_[0]; i++) {
+      position[0] = i;
+      enumerate_position_(1, position, fn);
+    }
+  }
+
+  //----------------------------------------------------------------------------
+
+  auto print_array_(std::ostream &os, size_t dim, size_t arr_index,
+                    const std::string &delims) const {
+    auto n = shape_[dim];
+    if (dim + 1 == dimension()) {
+      for (size_t i = 0; i < n; i++, arr_index++) {
+        if (i > 0) {
+          os << delims[0];
+        }
+        if constexpr (std::is_same_v<T, bool>) {
+          os << (at(arr_index) ? "true" : "false");
+        } else {
+          os << at(arr_index);
+        }
+      }
+      return arr_index;
+    }
+
+    for (size_t i = 0; i < n; i++) {
+      if (dim < dimension() && i > 0) {
+        os << "\n ";
+        for (size_t j = 0; j < dim; j++) {
+          os << delims[0];
+        }
+      }
+      os << delims[1];
+      arr_index = print_array_(os, dim + 1, arr_index, delims);
+      os << delims[2];
+    }
+    return arr_index;
+  }
+
+  auto print_array_(const std::string &delims) const {
+    std::stringstream ss;
+    if (dimension() == 0) {
+      ss << at();
+    } else {
+      ss << delims[1];
+      print_array_(ss, 0, 0, delims);
+      ss << delims[2];
+    }
+    return ss.str();
   }
 
   //----------------------------------------------------------------------------
@@ -883,45 +1171,52 @@ class array {
   }
 };
 
-//------------------------------------------------------------------------------
+//----------------------------------------------------------------------------
 
-template <typename T>
-inline auto print(std::ostream &os, const array<T> &arr, size_t dim,
-                    size_t arr_index) {
-  if (dim + 1 == arr.dimension()) {
-    for (size_t i = 0; i < arr.shape()[dim]; i++, arr_index++) {
-      if (i > 0) {
-        os << ' ';
-      }
-      os << arr.at(arr_index);
+template <value_type T>
+inline bool array_equal(const array<T> &a, const array<T> &b) {
+  if (&a != &b) {
+    if (a.shape() != b.shape()) {
+      return false;
     }
-    return arr_index;
-  }
 
-  for (size_t i = 0; i < arr.shape()[dim]; i++) {
-    // if (dim == 0 && i > 0) {
-    if (dim < arr.dimension() && i > 0) {
-      os << "\n ";
-      for (size_t j = 0; j < dim; j++) {
-        os << ' ';
+    for (size_t i = 0; i < a.element_count(); i++) {
+      if (a.at(i) != b.at(i)) {
+        return false;
       }
     }
-    os << '[';
-    arr_index = print(os, arr, dim + 1, arr_index);
-    os << ']';
   }
-  return arr_index;
+  return true;
 }
 
-template <typename T>
-inline auto &operator<<(std::ostream &os, const array<T> &arr) {
-  if (arr.dimension() == 0) {
-    os << arr.at();
-  } else {
-    os << "[";
-    print(os, arr, 0, 0);
-    os << "]";
+template <value_type T>
+inline bool allclose(const array<T> &a, const array<T> &b,
+                     float tolerance = 1e-3) {
+  if (&a != &b) {
+    if (a.shape() != b.shape()) {
+      return false;
+    }
+
+    for (size_t i = 0; i < a.element_count(); i++) {
+      if constexpr (std::is_same_v<T, float>) {
+        if (std::abs(a.at(i) - b.at(i)) > tolerance) {
+          return false;
+        }
+      } else {
+        if (a.at(i) != b.at(i)) {
+          return false;
+        }
+      }
+    }
   }
+  return true;
+}
+
+//----------------------------------------------------------------------------
+
+template <typename T>
+inline std::ostream &operator<<(std::ostream &os, const array<T> &arr) {
+  os << arr.print_array_numpy_format();
   return os;
 }
 
@@ -930,6 +1225,13 @@ inline auto &operator<<(std::ostream &os, const array<T> &arr) {
 template <typename T>
 inline auto vector(size_t length) {
   return array<T>(shape_type{length});
+}
+
+template <typename T>
+inline auto vector(size_t length, std::input_iterator auto it) {
+  auto tmp = vector<T>(length);
+  tmp.set(it);
+  return tmp;
 }
 
 template <typename T>
@@ -968,6 +1270,13 @@ inline auto ones(size_t length) {
 template <typename T>
 inline auto matrix(size_t row, size_t col) {
   return array<T>(shape_type{row, col});
+}
+
+template <typename T>
+inline auto matrix(size_t row, size_t col, std::input_iterator auto it) {
+  auto tmp = matrix<T>(row, col);
+  tmp.set(it);
+  return tmp;
 }
 
 template <typename T>

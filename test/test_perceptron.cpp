@@ -1,7 +1,5 @@
 #include <array.h>
 
-#include <iostream>
-
 #include "doctest.h"
 #include "utils.h"
 

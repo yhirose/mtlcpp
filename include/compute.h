@@ -5,7 +5,8 @@
 namespace mtl {
 
 template <typename T>
-concept value_type = std::same_as<T, float> || std::same_as<T, int>;
+concept value_type =
+    std::same_as<T, float> || std::same_as<T, int> || std::same_as<T, bool>;
 
 enum class Device {
   GPU = 0,
