@@ -131,8 +131,6 @@ class mnist_data {
 };
 
 struct Network {
-  // std::map<std::string, MatrixXd> w;
-  // std::map<std::string, RowVectorXd> b;
   std::map<std::string, mtl::array<float>> w;
   std::map<std::string, mtl::array<float>> b;
 };
@@ -162,8 +160,8 @@ Network init_network() {
     std::istringstream s(line);
 
     std::string label;
-    int rows;
-    int cols;
+    size_t rows;
+    size_t cols;
     s >> label >> rows >> cols;
 
     std::vector<float> values;
@@ -180,9 +178,9 @@ Network init_network() {
     }
 
     if (rows > 1) {
-      network.w[label] = mtl::matrix<float>(rows, cols, values);
+      network.w[label] = mtl::array<float>({rows, cols}, values);
     } else {
-      network.b[label] = mtl::vector<float>(cols, values);
+      network.b[label] = mtl::array<float>({cols}, values);
     }
   }
   return network;
@@ -217,10 +215,10 @@ int main(void) {
     size_t accuracy_cnt = 0;
 
     for (auto i = 0u; i < data.size(); i += batch_size) {
-      auto x = mtl::matrix<float>(batch_size, data.image_pixel_size(),
-                                  p + data.image_pixel_size() * i);
+      auto x = mtl::array<float>({batch_size, data.image_pixel_size()},
+                                 p + data.image_pixel_size() * i);
       auto y = predict(network, x);
-      auto e = mtl::vector<int>(batch_size, data.label_data() + i);
+      auto e = mtl::array<int>({batch_size}, data.label_data() + i);
       auto a = y.argmax();
 
       auto r = e == a;

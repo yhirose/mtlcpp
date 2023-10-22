@@ -3,8 +3,6 @@
 #include "doctest.h"
 #include "utils.h"
 
-using namespace mtl;
-
 class LogicGate {
  private:
   float w0 = 0.1;
@@ -21,7 +19,7 @@ class LogicGate {
   }
 
  public:
-  LogicGate(array<int>&& dataset) {
+  LogicGate(mtl::array<int>&& dataset) {
     auto max_iteration = 10;
     auto learning_rate = 1.0;
 

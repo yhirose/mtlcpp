@@ -17,7 +17,7 @@ using strides_type = std::vector<size_t>;
 
 template <typename T, size_t I>
 struct nested_initializer_list_ {
-  using nested_type = typename nested_initializer_list_<T, I - 1>::type;
+  using nested_type = nested_initializer_list_<T, I - 1>::type;
   using type = std::initializer_list<nested_type>;
 };
 
@@ -95,7 +95,7 @@ constexpr size_t nested_initializer_item_count_(std::initializer_list<T> l) {
 }
 
 template <typename T, size_t I>
-using nested_initializer_list = typename nested_initializer_list_<T, I>::type;
+using nested_initializer_list = nested_initializer_list_<T, I>::type;
 
 //------------------------------------------------------------------------------
 
@@ -115,35 +115,52 @@ class array {
   array(const array &rhs) = default;
   array &operator=(const array &rhs) = default;
 
-  array(const shape_type &shape) {
+  array(const shape_type &shape, T val) {
     reshape(shape);
     allocate_buffer_();
+    constants(val);
   }
 
-  array(T val) : array(shape_type({})) { *buffer_data() = val; }
+  array(const shape_type &shape, std::input_iterator auto it) {
+    reshape(shape);
+    allocate_buffer_();
+    set(it);
+  }
+
+  array(const shape_type &shape, std::ranges::input_range auto &&r) {
+    reshape(shape);
+    allocate_buffer_();
+    set(r);
+  }
+
+  array(T val) : array(nullptr, shape_type({})) { *buffer_data() = val; }
 
   array(nested_initializer_list<T, 1> l)
-      : array(nested_initializer_list_shape_(l)) {
+      : array(nullptr, nested_initializer_list_shape_(l)) {
     copy_initializer_list_(l);
   }
   array(nested_initializer_list<T, 2> l)
-      : array(nested_initializer_list_shape_(l)) {
+      : array(nullptr, nested_initializer_list_shape_(l)) {
     copy_initializer_list_(l);
   }
   array(nested_initializer_list<T, 3> l)
-      : array(nested_initializer_list_shape_(l)) {
+      : array(nullptr, nested_initializer_list_shape_(l)) {
     copy_initializer_list_(l);
   }
   array(nested_initializer_list<T, 4> l)
-      : array(nested_initializer_list_shape_(l)) {
+      : array(nullptr, nested_initializer_list_shape_(l)) {
     copy_initializer_list_(l);
+  }
+
+  static array from_shape(const shape_type &shape) {
+    return array<T>(nullptr, shape);
   }
 
   //----------------------------------------------------------------------------
 
   template <value_type U = T>
   array<U> clone() const {
-    array<U> tmp(shape_);
+    auto tmp = array<U>::from_shape(shape_);
     for (size_t i = 0; i < element_count(); i++) {
       tmp.at(i) = static_cast<U>(at(i));
     }
@@ -153,7 +170,7 @@ class array {
   //----------------------------------------------------------------------------
 
   array<bool> operator==(const array &rhs) const {
-    array<bool> tmp(shape_);
+    auto tmp = array<bool>::from_shape(shape_);
     for (size_t i = 0; i < element_count(); i++) {
       tmp.at(i) = at(i) == rhs.at(i);
     }
@@ -730,7 +747,7 @@ class array {
   array dot(const array &rhs) const {
     if (dimension() == 1 && rhs.dimension() == 1 &&
         shape_[0] == rhs.shape_[0]) {
-      auto tmp = array(shape_type{});
+      auto tmp = array::from_shape(shape_type{});
 
       T val = 0;
       for (size_t i = 0; i < shape_[0]; i++) {
@@ -744,7 +761,7 @@ class array {
         shape_[1] == rhs.shape_[0]) {
       auto rows = shape_[0];
       auto cols = rhs.shape_[1];
-      auto tmp = array(shape_type{rows, cols});
+      auto tmp = array::from_shape(shape_type{rows, cols});
 
       for (size_t row = 0; row < rows; row++) {
         for (size_t col = 0; col < cols; col++) {
@@ -762,7 +779,7 @@ class array {
         shape_[0] == rhs.shape_[0]) {
       auto rows = 1;
       auto cols = rhs.shape_[1];
-      auto tmp = array(shape_type{cols});
+      auto tmp = array::from_shape(shape_type{cols});
 
       for (size_t col = 0; col < cols; col++) {
         T val = 0;
@@ -777,7 +794,7 @@ class array {
     if (dimension() == 2 && rhs.dimension() == 1 &&
         shape_[1] == rhs.shape_[0]) {
       auto rows = shape_[0];
-      auto tmp = array(shape_type{rows});
+      auto tmp = array::from_shape(shape_type{rows});
 
       for (size_t row = 0; row < rows; row++) {
         T val = 0;
@@ -861,7 +878,7 @@ class array {
   //----------------------------------------------------------------------------
 
   array sigmoid() const {
-    array<float> tmp(shape_);
+    auto tmp = array<float>::from_shape(shape_);
     for (size_t i = 0; i < element_count(); i++) {
       tmp.at(i) = 1.0 / (1.0 + std::exp(-static_cast<float>(at(i))));
     }
@@ -878,7 +895,7 @@ class array {
     auto s = shape_;
     s.erase(s.begin() + axis);
 
-    auto tmp = array(s);
+    auto tmp = array::from_shape(s);
 
     enumerate_position_([&](const auto &pos) {
       auto p = pos;
@@ -947,14 +964,14 @@ class array {
   array<float> softmax() const {
     if (dimension() == 1) {
       auto c = min();
-      auto tmp = array<float>{shape_};
+      auto tmp = array<float>::from_shape(shape_);
 
       for (size_t i = 0; i < element_count(); i++) {
         tmp.at(i) = std::exp(at(i) - c);
       }
       return tmp / tmp.sum();
     } else if (dimension() == 2) {
-      auto tmp = array<float>{shape_};
+      auto tmp = array<float>::from_shape(shape_);
 
       for (size_t i = 0; i < shape_[0]; i++) {
         const auto row = (*this)[i];
@@ -978,7 +995,7 @@ class array {
   auto argmax() const {
     if (dimension() == 2) {
       auto row_count = shape_[0];
-      auto tmp = array<int>(shape_type{row_count});
+      auto tmp = array<int>::from_shape(shape_type{row_count});
 
       for (size_t i = 0; i < row_count; i++) {
         const auto row = (*this)[i];
@@ -1005,6 +1022,11 @@ class array {
   }
 
  private:
+  array(void *dummy, const shape_type &shape) {
+    reshape(shape);
+    allocate_buffer_();
+  }
+
   void allocate_buffer_() {
     buf_off_ = 0;
     buf_len_ = element_count();
@@ -1125,7 +1147,7 @@ class array {
   static auto gpu_binary_operation_(const array &lhs, const array &rhs,
                                     Operation ope) {
     return broadcast_(lhs, rhs, [ope](const auto &lhs, const auto &rhs) {
-      auto tmp = array(lhs.shape());
+      auto tmp = array::from_shape(lhs.shape());
       mtl::compute<T>(
           lhs.buf_, lhs.buf_off_ * sizeof(T), lhs.buf_len_ * sizeof(T),
           rhs.buf_, rhs.buf_off_ * sizeof(T), rhs.buf_len_ * sizeof(T),
@@ -1149,7 +1171,7 @@ class array {
             return cb([](T lhs, T rhs) { return lhs / rhs; });
         }
       }([&](auto fn) {
-        auto tmp = array(lhs.shape());
+        auto tmp = array::from_shape(lhs.shape());
         for (size_t i = 0; i < lhs.element_count(); i++) {
           tmp.at(i) = fn(lhs.at(i), rhs.at(i));
         }
@@ -1214,108 +1236,38 @@ inline bool allclose(const array<T> &a, const array<T> &b,
 
 //----------------------------------------------------------------------------
 
-template <typename T>
+template <value_type T>
 inline std::ostream &operator<<(std::ostream &os, const array<T> &arr) {
   os << arr.print_array_numpy_format();
   return os;
 }
 
-//------------------------------------------------------------------------------
+//----------------------------------------------------------------------------
 
-template <typename T>
-inline auto vector(size_t length) {
-  return array<T>(shape_type{length});
+template <value_type T>
+inline auto from_shape(const shape_type &shape) {
+  return array<T>::from_shape(shape);
 }
 
-template <typename T>
-inline auto vector(size_t length, std::input_iterator auto it) {
-  auto tmp = vector<T>(length);
-  tmp.set(it);
-  return tmp;
+template <value_type T>
+inline auto constants(const shape_type &shape, T val) {
+  return array<T>(shape, val);
 }
 
-template <typename T>
-inline auto vector(size_t length, std::ranges::input_range auto &&r) {
-  auto tmp = vector<T>(length);
-  tmp.set(r);
-  return tmp;
+template <value_type T>
+inline auto zeros(const shape_type &shape) {
+  return array<T>(shape, 0);
 }
 
-template <typename T>
-inline auto random(size_t length) {
-  auto tmp = vector<T>(length);
+template <value_type T>
+inline auto ones(const shape_type &shape) {
+  return array<T>(shape, 1);
+}
+
+template <value_type T>
+inline auto random(const shape_type &shape) {
+  auto tmp = array<T>::from_shape(shape);
   tmp.random();
-  return tmp;
-}
-
-template <typename T>
-inline auto constants(size_t length, T val) {
-  auto tmp = vector<T>(length);
-  tmp.constants(val);
-  return tmp;
-}
-
-template <typename T>
-inline auto zeros(size_t length) {
-  return constants<T>(length, 0);
-}
-
-template <typename T>
-inline auto ones(size_t length) {
-  return constants<T>(length, 1);
-}
-
-//------------------------------------------------------------------------------
-
-template <typename T>
-inline auto matrix(size_t row, size_t col) {
-  return array<T>(shape_type{row, col});
-}
-
-template <typename T>
-inline auto matrix(size_t row, size_t col, std::input_iterator auto it) {
-  auto tmp = matrix<T>(row, col);
-  tmp.set(it);
-  return tmp;
-}
-
-template <typename T>
-inline auto matrix(size_t row, size_t col, std::ranges::input_range auto &&r) {
-  auto tmp = matrix<T>(row, col);
-  tmp.set(r);
-  return tmp;
-}
-
-template <typename T>
-inline auto matrix(nested_initializer_list<T, 2> l) {
-  return array<T>(l);
-}
-
-template <typename T>
-inline auto random(size_t row, size_t col) {
-  auto tmp = matrix<T>(row, col);
-  tmp.random();
-  return tmp;
-}
-
-template <typename T>
-inline auto constants(size_t row, size_t col, T val) {
-  auto tmp = matrix<T>(row, col);
-  tmp.constants(val);
-  return tmp;
-}
-
-template <typename T>
-inline auto zeros(size_t row, size_t col) {
-  auto tmp = matrix<T>(row, col);
-  tmp.constants(0);
-  return tmp;
-}
-
-template <typename T>
-inline auto ones(size_t row, size_t col) {
-  auto tmp = matrix<T>(row, col);
-  tmp.constants(1);
   return tmp;
 }
 
