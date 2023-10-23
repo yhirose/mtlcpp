@@ -10,8 +10,15 @@
 
 namespace mtl {
 
+enum class Device {
+  GPU = 0,
+  CPU,
+};
+
+static Device device = Device::GPU;
+
 using shape_type = std::vector<size_t>;
-using strides_type = std::vector<size_t>;
+using strides_type = shape_type;
 
 //------------------------------------------------------------------------------
 
@@ -130,7 +137,14 @@ class array {
   array(const shape_type &shape, std::ranges::input_range auto &&r) {
     reshape(shape);
     allocate_buffer_();
-    set(r);
+    set(r.begin());
+  }
+
+  array(std::ranges::input_range auto &&r) {
+    size_t element_count = std::ranges::distance(r);
+    reshape({element_count});
+    allocate_buffer_();
+    set(r.begin());
   }
 
   array(T val) : array(nullptr, shape_type({})) { *buffer_data() = val; }
@@ -152,15 +166,13 @@ class array {
     copy_initializer_list_(l);
   }
 
-  static array from_shape(const shape_type &shape) {
-    return array<T>(nullptr, shape);
-  }
+  static array empty(const shape_type &shape) { return array(nullptr, shape); }
 
   //----------------------------------------------------------------------------
 
   template <value_type U = T>
   array<U> clone() const {
-    auto tmp = array<U>::from_shape(shape_);
+    auto tmp = array<U>::empty(shape_);
     for (size_t i = 0; i < element_count(); i++) {
       tmp.at(i) = static_cast<U>(at(i));
     }
@@ -170,7 +182,7 @@ class array {
   //----------------------------------------------------------------------------
 
   array<bool> operator==(const array &rhs) const {
-    auto tmp = array<bool>::from_shape(shape_);
+    auto tmp = array<bool>::empty(shape_);
     for (size_t i = 0; i < element_count(); i++) {
       tmp.at(i) = at(i) == rhs.at(i);
     }
@@ -627,9 +639,6 @@ class array {
       at(i) = *it++;
     }
   }
-  void set(std::ranges::input_range auto &&r) {
-    std::ranges::copy(r, element_begin());
-  }
   void set(std::initializer_list<T> l) {
     std::ranges::copy(l, element_begin());
   }
@@ -688,42 +697,81 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  std::string print_shape() const {
+  std::string print_shape_type(const shape_type &shape) const {
     std::stringstream ss;
-    ss << "(";
-    for (size_t i = 0; i < shape_.size(); i++) {
+    ss << "{";
+    for (size_t i = 0; i < shape.size(); i++) {
       if (i != 0) {
-        ss << ":";
+        ss << ", ";
       }
-      ss << shape_[i];
+      ss << shape[i];
     }
-    ss << ")";
+    ss << "}";
     return ss.str();
   }
 
+  std::string print_shape() const { return print_shape_type(shape_); }
+
+  std::string print_strides() const { return print_shape_type(strides_); }
+
   std::string print_data_type() const {
     if constexpr (std::is_same_v<T, float>) {
-      return "<float>";
+      return "float";
     } else {
-      return "<int>";
+      return "int";
     }
   }
 
   std::string print_info() const {
     std::stringstream ss;
-    ss << "dimension: " << dimension() << ", shape: " << print_shape()
-       << ", dtype: " << print_data_type();
+    ss << "dtype: " << print_data_type() << ", dim: " << dimension()
+       << ", shape: " << print_shape() << ", strides: " << print_strides();
     return ss.str();
   }
 
-  std::string print_array_numpy_format() const {
-    std::string delims = " []";
-    return print_array_(delims);
-  }
+  std::string print_array() const {
+    auto loop = [&](auto self, auto &os, auto dim, auto arr_index) {
+      auto n = shape_[dim];
+      if (dim + 1 == dimension()) {
+        for (size_t i = 0; i < n; i++, arr_index++) {
+          if (i > 0) {
+            os << ", ";
+          }
+          if constexpr (std::is_same_v<T, bool>) {
+            os << (at(arr_index) ? "true" : "false");
+          } else {
+            os << at(arr_index);
+          }
+        }
+        return arr_index;
+      }
 
-  std::string print_array_cpp_format() const {
-    std::string delims = ",{}";
-    return print_array_(delims);
+      for (size_t i = 0; i < n; i++) {
+        if (dim < dimension() && i > 0) {
+          os << ",\n";
+          if (dimension() >= 3 && dim == 0 && i > 0) {
+            os << "\n";
+          }
+          for (size_t j = 0; j <= dim; j++) {
+            os << " ";
+          }
+        }
+        os << '{';
+        arr_index = self(self, os, dim + 1, arr_index);
+        os << '}';
+      }
+      return arr_index;
+    };
+
+    std::stringstream ss;
+    if (dimension() == 0) {
+      ss << at();
+    } else {
+      ss << '{';
+      loop(loop, ss, 0, 0);
+      ss << '}';
+    }
+    return ss.str();
   }
 
   //----------------------------------------------------------------------------
@@ -747,7 +795,7 @@ class array {
   array dot(const array &rhs) const {
     if (dimension() == 1 && rhs.dimension() == 1 &&
         shape_[0] == rhs.shape_[0]) {
-      auto tmp = array::from_shape(shape_type{});
+      auto tmp = array::empty({});
 
       T val = 0;
       for (size_t i = 0; i < shape_[0]; i++) {
@@ -761,7 +809,7 @@ class array {
         shape_[1] == rhs.shape_[0]) {
       auto rows = shape_[0];
       auto cols = rhs.shape_[1];
-      auto tmp = array::from_shape(shape_type{rows, cols});
+      auto tmp = array::empty({rows, cols});
 
       for (size_t row = 0; row < rows; row++) {
         for (size_t col = 0; col < cols; col++) {
@@ -779,7 +827,7 @@ class array {
         shape_[0] == rhs.shape_[0]) {
       auto rows = 1;
       auto cols = rhs.shape_[1];
-      auto tmp = array::from_shape(shape_type{cols});
+      auto tmp = array::empty({cols});
 
       for (size_t col = 0; col < cols; col++) {
         T val = 0;
@@ -794,7 +842,7 @@ class array {
     if (dimension() == 2 && rhs.dimension() == 1 &&
         shape_[1] == rhs.shape_[0]) {
       auto rows = shape_[0];
-      auto tmp = array::from_shape(shape_type{rows});
+      auto tmp = array::empty({rows});
 
       for (size_t row = 0; row < rows; row++) {
         T val = 0;
@@ -878,7 +926,7 @@ class array {
   //----------------------------------------------------------------------------
 
   array sigmoid() const {
-    auto tmp = array<float>::from_shape(shape_);
+    auto tmp = array<float>::empty(shape_);
     for (size_t i = 0; i < element_count(); i++) {
       tmp.at(i) = 1.0 / (1.0 + std::exp(-static_cast<float>(at(i))));
     }
@@ -895,7 +943,7 @@ class array {
     auto s = shape_;
     s.erase(s.begin() + axis);
 
-    auto tmp = array::from_shape(s);
+    auto tmp = array::empty(s);
 
     enumerate_position_([&](const auto &pos) {
       auto p = pos;
@@ -940,17 +988,6 @@ class array {
     return max_val;
   }
 
-  template <typename U>
-  bool all(U fn) const {
-    for (size_t i = 0; i < buffer_element_count(); i++) {
-      auto val = buffer_data()[i];
-      if (!fn(val)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
   size_t count() const {
     size_t cnt = 0;
     for (size_t i = 0; i < element_count(); i++) {
@@ -961,17 +998,36 @@ class array {
     return cnt;
   }
 
+  bool all(arithmetic auto val) const {
+    for (size_t i = 0; i < buffer_element_count(); i++) {
+      if (buffer_data()[i] != val) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  template <typename U>
+  bool all(U fn) const {
+    for (size_t i = 0; i < buffer_element_count(); i++) {
+      if (!fn(buffer_data()[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   array<float> softmax() const {
     if (dimension() == 1) {
       auto c = min();
-      auto tmp = array<float>::from_shape(shape_);
+      auto tmp = array<float>::empty(shape_);
 
       for (size_t i = 0; i < element_count(); i++) {
         tmp.at(i) = std::exp(at(i) - c);
       }
       return tmp / tmp.sum();
     } else if (dimension() == 2) {
-      auto tmp = array<float>::from_shape(shape_);
+      auto tmp = array<float>::empty(shape_);
 
       for (size_t i = 0; i < shape_[0]; i++) {
         const auto row = (*this)[i];
@@ -995,7 +1051,7 @@ class array {
   auto argmax() const {
     if (dimension() == 2) {
       auto row_count = shape_[0];
-      auto tmp = array<int>::from_shape(shape_type{row_count});
+      auto tmp = array<int>::empty({row_count});
 
       for (size_t i = 0; i < row_count; i++) {
         const auto row = (*this)[i];
@@ -1088,51 +1144,6 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  auto print_array_(std::ostream &os, size_t dim, size_t arr_index,
-                    const std::string &delims) const {
-    auto n = shape_[dim];
-    if (dim + 1 == dimension()) {
-      for (size_t i = 0; i < n; i++, arr_index++) {
-        if (i > 0) {
-          os << delims[0];
-        }
-        if constexpr (std::is_same_v<T, bool>) {
-          os << (at(arr_index) ? "true" : "false");
-        } else {
-          os << at(arr_index);
-        }
-      }
-      return arr_index;
-    }
-
-    for (size_t i = 0; i < n; i++) {
-      if (dim < dimension() && i > 0) {
-        os << "\n ";
-        for (size_t j = 0; j < dim; j++) {
-          os << delims[0];
-        }
-      }
-      os << delims[1];
-      arr_index = print_array_(os, dim + 1, arr_index, delims);
-      os << delims[2];
-    }
-    return arr_index;
-  }
-
-  auto print_array_(const std::string &delims) const {
-    std::stringstream ss;
-    if (dimension() == 0) {
-      ss << at();
-    } else {
-      ss << delims[1];
-      print_array_(ss, 0, 0, delims);
-      ss << delims[2];
-    }
-    return ss.str();
-  }
-
-  //----------------------------------------------------------------------------
-
   static auto broadcast_(const array &lhs, const array &rhs, auto cb) {
     if (lhs.shape() == rhs.shape()) {
       return cb(lhs, rhs);
@@ -1147,7 +1158,7 @@ class array {
   static auto gpu_binary_operation_(const array &lhs, const array &rhs,
                                     Operation ope) {
     return broadcast_(lhs, rhs, [ope](const auto &lhs, const auto &rhs) {
-      auto tmp = array::from_shape(lhs.shape());
+      auto tmp = array::empty(lhs.shape());
       mtl::compute<T>(
           lhs.buf_, lhs.buf_off_ * sizeof(T), lhs.buf_len_ * sizeof(T),
           rhs.buf_, rhs.buf_off_ * sizeof(T), rhs.buf_len_ * sizeof(T),
@@ -1171,7 +1182,7 @@ class array {
             return cb([](T lhs, T rhs) { return lhs / rhs; });
         }
       }([&](auto fn) {
-        auto tmp = array::from_shape(lhs.shape());
+        auto tmp = array::empty(lhs.shape());
         for (size_t i = 0; i < lhs.element_count(); i++) {
           tmp.at(i) = fn(lhs.at(i), rhs.at(i));
         }
@@ -1238,20 +1249,15 @@ inline bool allclose(const array<T> &a, const array<T> &b,
 
 template <value_type T>
 inline std::ostream &operator<<(std::ostream &os, const array<T> &arr) {
-  os << arr.print_array_numpy_format();
+  os << arr.print_array();
   return os;
 }
 
 //----------------------------------------------------------------------------
 
 template <value_type T>
-inline auto from_shape(const shape_type &shape) {
-  return array<T>::from_shape(shape);
-}
-
-template <value_type T>
-inline auto constants(const shape_type &shape, T val) {
-  return array<T>(shape, val);
+inline auto empty(const shape_type &shape) {
+  return array<T>::empty(shape);
 }
 
 template <value_type T>
@@ -1264,9 +1270,8 @@ inline auto ones(const shape_type &shape) {
   return array<T>(shape, 1);
 }
 
-template <value_type T>
 inline auto random(const shape_type &shape) {
-  auto tmp = array<T>::from_shape(shape);
+  auto tmp = array<float>::empty(shape);
   tmp.random();
   return tmp;
 }

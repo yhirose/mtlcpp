@@ -1,7 +1,6 @@
 #include <array.h>
 
 #include "doctest.h"
-#include "utils.h"
 
 class LogicGate {
  private:

@@ -18,7 +18,7 @@ TEST_CASE("add") {
 
   auto a = mtl::ones<float>({n});
   auto b = mtl::ones<float>({n});
-  auto e = mtl::constants<float>({n}, 2);
+  auto e = mtl::array<float>({n}, 2);
   auto c = mtl::array<float>();
   Bench().run("mtlcpp: a + b", [&] { c = a + b; });
   CHECK(mtl::array_equal(e, c));
@@ -41,7 +41,7 @@ TEST_CASE("add") {
 TEST_CASE("dot") {
   auto a = mtl::ones<float>({1000, 100});
   auto b = mtl::ones<float>({100, 10});
-  auto e = mtl::constants<float>({1000, 10}, 100);
+  auto e = mtl::array<float>({1000, 10}, 100);
   auto c = mtl::array<float>();
   Bench().run("mtlcpp: a.dot(b)", [&] { c = a.dot(b); });
   CHECK(mtl::array_equal(e, c));

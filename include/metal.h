@@ -1,6 +1,6 @@
 #pragma once
 
-#include <compute.h>
+#include <common.h>
 
 #include <Metal/Metal.hpp>
 #include <sstream>

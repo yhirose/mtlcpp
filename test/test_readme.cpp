@@ -1,48 +1,25 @@
-mtlcpp
-======
-
-A C++20 linear algebra library for Metal on MacOS
-
- * This project is still in development and is far from reaching the first alpha version. :)
- * Data types supported in this library are `int` and `float` only, since Metal doesn't support `double`.
-
-Build and run unit tests
-------------------------
-
- * Install Xcode Command Line Tools
- * Run the following commands in Terminal
-
-```bash
-cd test
-make test && ./test
-```
-
-Example
--------
-
-```cpp
 #include <array.h>
 
 #include "doctest.h"
 
 using namespace mtl;
 
-TEST_CASE("create empty array") {
+TEST_CASE("readme: create empty array") {
   auto i = empty<int>({2, 3, 2});
   auto f = empty<float>({2, 3, 2});
   // auto d = empty<double>({2, 3}); // cannot compile...
 }
 
-TEST_CASE("create array with constants") {
+TEST_CASE("readme: create array with constants") {
   auto s = array<float>(1);
   auto v = array<float>{1, 2, 3, 4, 5, 6};
   auto m = array<float>{{1, 2}, {3, 4}, {5, 6}};
   auto t = array<float>{{{1, 2}, {3, 4}, {5, 6}}, {{7, 8}, {9, 10}, {11, 12}}};
 
-  std::cout << s.print_info() << std::endl << s << std::endl << std::endl;
-  std::cout << v.print_info() << std::endl << v << std::endl << std::endl;
-  std::cout << m.print_info() << std::endl << m << std::endl << std::endl;
-  std::cout << t.print_info() << std::endl << t << std::endl << std::endl;
+  // std::cout << s.print_info() << std::endl << s << std::endl << std::endl;
+  // std::cout << v.print_info() << std::endl << v << std::endl << std::endl;
+  // std::cout << m.print_info() << std::endl << m << std::endl << std::endl;
+  // std::cout << t.print_info() << std::endl << t << std::endl << std::endl;
 
   // dtype: float, dim: 0, shape: {}, strides: {1}
   // 1
@@ -65,7 +42,7 @@ TEST_CASE("create array with constants") {
   //   {11, 12}}}
 }
 
-TEST_CASE("create array with shape") {
+TEST_CASE("readme: create array with shape") {
   auto zeros1 = array<float>({2, 3, 2}, 0);
   auto zeros2 = zeros<float>({2, 3, 2});
   CHECK(array_equal(zeros1, zeros2));
@@ -90,7 +67,7 @@ TEST_CASE("create array with shape") {
   CHECK(array_equal(from_range2, expected));
 }
 
-TEST_CASE("clone array") {
+TEST_CASE("readme: clone array") {
   auto a = ones<float>({8});
 
   auto cloned = a.clone();
@@ -102,7 +79,7 @@ TEST_CASE("clone array") {
   CHECK(array_equal(a, zeros<float>({8})));
 }
 
-TEST_CASE("arithmatic operations") {
+TEST_CASE("readme: arithmatic operations") {
   auto a = array<float>{{1, 2}, {3, 4}};
   auto b = array<float>{{1, 2}, {3, 4}};
 
@@ -119,16 +96,11 @@ TEST_CASE("arithmatic operations") {
   CHECK(array_equal(div, {{1, 1}, {1, 1}}));
 }
 
-TEST_CASE("dot operation") {
+TEST_CASE("readme: dot operation") {
   auto x = array<float>{1, 2, 3};
   auto W = array<float>{{1, 2}, {3, 4}, {5, 6}};
 
   auto y = x.dot(W);
   CHECK(array_equal(y, {22, 28}));
 }
-```
 
-License
--------
-
-MIT license (© 2023 Yuji Hirose)

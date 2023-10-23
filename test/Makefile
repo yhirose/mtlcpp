@@ -3,9 +3,9 @@ METAL_CPP_DIR = ../metal-cpp_macOS13.3_iOS16.4
 CXX = clang++
 CXXFLAGS = -std=c++20 -O2 -I$(METAL_CPP_DIR) -I../include -framework Foundation -framework Metal -framework MetalKit
 
-INC = ../include/metal.h ../include/compute.h ../include/array.h
+INC = ../include/metal.h ../include/common.h ../include/array.h
 
-TEST_SRC = test_metal.cpp test_array.cpp test_perceptron.cpp test.cpp
+TEST_SRC = test_metal.cpp test_array.cpp test_readme.cpp test_perceptron.cpp test.cpp
 BENCH_SRC = bench.cpp
 MNIST_SRC = mnist.cpp
 

@@ -56,7 +56,7 @@ void random(managed_ptr<MTL::Buffer> &buf) {
 
 //------------------------------------------------------------------------------
 
-TEST_CASE("testing basic operations") {
+TEST_CASE("metal: basic operations") {
   auto dev = managed(MTL::CreateSystemDefaultDevice());
   auto mtl = metal(dev.get());
 
