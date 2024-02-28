@@ -91,15 +91,15 @@ TEST_CASE("create array with shape") {
 }
 
 TEST_CASE("clone array") {
-  auto a = ones<float>({8});
+  auto a = ones<float>({4});
 
   auto cloned = a.clone();
   cloned.zeros();
-  CHECK(array_equal(a, ones<float>({8})));
+  CHECK(array_equal(a, {1, 1, 1, 1}));
 
   auto assigned = a;
   assigned.zeros();
-  CHECK(array_equal(a, zeros<float>({8})));
+  CHECK(array_equal(a, {0, 0, 0, 0}));
 }
 
 TEST_CASE("arithmatic operations") {

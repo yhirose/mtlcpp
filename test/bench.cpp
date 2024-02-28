@@ -6,7 +6,6 @@
 #include <array.h>
 
 #include <eigen3/Eigen/Core>
-#include <xtensor.hpp>
 
 #include "doctest.h"
 #include "nanobench.h"
@@ -20,7 +19,12 @@ TEST_CASE("add") {
   auto b = mtl::ones<float>({n});
   auto e = mtl::array<float>({n}, 2);
   auto c = mtl::array<float>();
-  Bench().run("mtlcpp: a + b", [&] { c = a + b; });
+  Bench().run("GPU: a + b", [&] { c = a + b; });
+  CHECK(mtl::array_equal(e, c));
+
+  mtl::device = mtl::Device::CPU;
+  Bench().run("CPU: a + b", [&] { c = a + b; });
+  mtl::device = mtl::Device::GPU;
   CHECK(mtl::array_equal(e, c));
 
   auto aa = Eigen::Vector<float, Eigen::Dynamic>::Ones(n);
@@ -29,13 +33,6 @@ TEST_CASE("add") {
   auto cc = Eigen::Vector<float, Eigen::Dynamic>(n);
   Bench().run("Eigen: a + b", [&] { cc = aa + bb; });
   CHECK(ee == cc);
-
-  auto aaa = xt::ones<float>({n});
-  auto bbb = xt::ones<float>({n});
-  auto eee = 2.0 * xt::ones<float>({n});
-  auto ccc = xt::xarray<float>({n});
-  Bench().run("xtensor: a + b", [&] { ccc = aaa + bbb; });
-  CHECK(eee == ccc);
 }
 
 TEST_CASE("dot") {
@@ -43,7 +40,7 @@ TEST_CASE("dot") {
   auto b = mtl::ones<float>({100, 10});
   auto e = mtl::array<float>({1000, 10}, 100);
   auto c = mtl::array<float>();
-  Bench().run("mtlcpp: a.dot(b)", [&] { c = a.dot(b); });
+  Bench().run("CPU: a.dot(b)", [&] { c = a.dot(b); });
   CHECK(mtl::array_equal(e, c));
 
   auto aa =

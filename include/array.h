@@ -935,7 +935,7 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  float sum() const {
+  T sum() const {
     return std::accumulate(element_cbegin(), element_cend(), T{});
   }
 
@@ -1220,6 +1220,16 @@ inline bool array_equal(const array<T> &a, const array<T> &b) {
     }
   }
   return true;
+}
+
+template <std::floating_point T, std::floating_point U>
+inline bool is_close(T a, U b, float tolerance = 1e-3) {
+  return std::abs(static_cast<float>(a) - static_cast<float>(b)) <= tolerance;
+}
+
+template <std::integral T, std::integral U>
+inline bool is_close(T a, U b) {
+  return a == b;
 }
 
 template <value_type T>

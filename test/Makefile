@@ -1,4 +1,4 @@
-METAL_CPP_DIR = ../metal-cpp_macOS13.3_iOS16.4
+METAL_CPP_DIR = ../metal-cpp_macOS14.2_iOS17.2
 
 CXX = clang++
 CXXFLAGS = -std=c++20 -O2 -I$(METAL_CPP_DIR) -I../include -framework Foundation -framework Metal -framework MetalKit

@@ -391,6 +391,8 @@ TEST_CASE("array: aggregate functions") {
   CHECK(array_equal(t.sum(0), {{21, 24, 27}, {30, 33, 36}}));
   CHECK(array_equal(t.sum(1), {{5, 7, 9}, {17, 19, 21}, {29, 31, 33}}));
   CHECK(array_equal(t.sum(2), {{6, 15}, {24, 33}, {42, 51}}));
+  CHECK(is_close(array<float>{1.1, 2.2}.sum(), 3.3));
+  CHECK(is_close(array<int>{1, 2}.sum(), 3l));
 
   CHECK(v.mean() == 3.5);
   CHECK(t.mean() == 9.5);
