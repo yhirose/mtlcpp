@@ -10,17 +10,25 @@ BENCH_SRC = bench.cpp
 MNIST_SRC = mnist.cpp
 
 all : test bench mnist
-	./test && ./bench && ./mnist
 
-test : $(INC) $(TEST_SRC) Makefile
+test : test-build
+	./test-build
+
+test-build : $(INC) $(TEST_SRC) Makefile
 	$(CXX) -o $@ $(CXXFLAGS) $(TEST_SRC)
 
-bench : $(INC) $(BENCH_SRC) Makefile
+bench : bench-build
+	./bench-build
+
+bench-build : $(INC) $(BENCH_SRC) Makefile
 	$(CXX) -o $@ $(CXXFLAGS) $(BENCH_SRC)
 
-mnist : $(INC) $(MNIST_SRC) Makefile
+mnist : mnist-build
+	./mnist-build
+
+mnist-build : $(INC) $(MNIST_SRC) Makefile
 	$(CXX) -o $@ $(CXXFLAGS) $(MNIST_SRC)
 
 clean:
-	rm -rf test bench mnist
+	rm -rf *-build
 

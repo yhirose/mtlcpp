@@ -1,7 +1,5 @@
 *.swp
 .DS_Store
 metal-cpp/*
-test/test
-test/bench
-test/mnist
+test/*-build
 misc/
