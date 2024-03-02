@@ -12,43 +12,24 @@ class memory_mapped_file {
  public:
   memory_mapped_file(const char* path) {
     fd_ = open(path, O_RDONLY);
-    if (fd_ == -1) {
-      std::runtime_error("");
-    }
+    assert(fd_ != -1);
 
     struct stat sb;
-    if (fstat(fd_, &sb) == -1) {
-      cleanup();
-      std::runtime_error("");
-    }
+    fstat(fd_, &sb);
     size_ = sb.st_size;
 
     addr_ = ::mmap(NULL, size_, PROT_READ, MAP_PRIVATE, fd_, 0);
-    if (addr_ == MAP_FAILED) {
-      cleanup();
-      std::runtime_error("");
-    }
+    assert(addr_ != MAP_FAILED);
   }
 
-  ~memory_mapped_file() { cleanup(); }
+  ~memory_mapped_file() {
+    munmap(addr_, size_);
+    close(fd_);
+  }
 
-  bool is_open() const { return addr_ != MAP_FAILED; }
-  size_t size() const { return size_; }
   const char* data() const { return (const char*)addr_; }
 
  private:
-  void cleanup() {
-    if (addr_ != MAP_FAILED) {
-      munmap(addr_, size_);
-      addr_ = MAP_FAILED;
-    }
-    if (fd_ != -1) {
-      close(fd_);
-      fd_ = -1;
-    }
-    size_ = 0;
-  }
-
   int fd_ = -1;
   size_t size_ = 0;
   void* addr_ = MAP_FAILED;
@@ -86,8 +67,6 @@ class mnist_data {
   size_t label(size_t i) const { return labels_[i]; }
 
   // Image
-  const uint8_t* image_data() const { return pixels_; }
-
   const float* normalized_image_data() const {
     if (normalized_pixels_.empty()) {
       auto total_pixels = image_pixel_size() * size();
@@ -203,12 +182,17 @@ auto predict(const Network& network, const mtl::array<float>& x) {
   return y;
 }
 
-int main(void) {
+int main(int argc, const char** argv) {
   try {
+    if (argc > 1) {
+      if (std::string("--cpu") == argv[1]) {
+        mtl::device = mtl::Device::CPU;
+      }
+    }
+
     auto data = mnist_data("t10k-labels-idx1-ubyte", "t10k-images-idx3-ubyte");
     auto network = init_network();
 
-    // auto p = data.image_data();
     auto p = data.normalized_image_data();
 
     size_t batch_size = 100;
