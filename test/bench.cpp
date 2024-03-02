@@ -19,12 +19,13 @@ TEST_CASE("add") {
   auto b = mtl::ones<float>({n});
   auto e = mtl::array<float>({n}, 2);
   auto c = mtl::array<float>();
-  Bench().run("GPU: a + b", [&] { c = a + b; });
-  CHECK(mtl::array_equal(e, c));
 
   mtl::device = mtl::Device::CPU;
   Bench().run("CPU: a + b", [&] { c = a + b; });
+  CHECK(mtl::array_equal(e, c));
+
   mtl::device = mtl::Device::GPU;
+  Bench().run("GPU: a + b", [&] { c = a + b; });
   CHECK(mtl::array_equal(e, c));
 
   auto aa = Eigen::Vector<float, Eigen::Dynamic>::Ones(n);
@@ -40,7 +41,13 @@ TEST_CASE("dot") {
   auto b = mtl::ones<float>({100, 10});
   auto e = mtl::array<float>({1000, 10}, 100);
   auto c = mtl::array<float>();
+
+  mtl::device = mtl::Device::CPU;
   Bench().run("CPU: a.dot(b)", [&] { c = a.dot(b); });
+  CHECK(mtl::array_equal(e, c));
+
+  mtl::device = mtl::Device::GPU;
+  Bench().run("GPU: a.dot(b)", [&] { c = a.dot(b); });
   CHECK(mtl::array_equal(e, c));
 
   auto aa =

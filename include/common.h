@@ -16,6 +16,7 @@ enum class Operation {
   Sub,
   Mul,
   Div,
+  Dot,
 };
 
 enum class DataType {

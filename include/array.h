@@ -793,68 +793,12 @@ class array {
   //----------------------------------------------------------------------------
 
   array dot(const array &rhs) const {
-    if (dimension() == 1 && rhs.dimension() == 1 &&
-        shape_[0] == rhs.shape_[0]) {
-      auto tmp = array::empty({});
-
-      T val = 0;
-      for (size_t i = 0; i < shape_[0]; i++) {
-        val += at(i) * rhs.at(i);
-      }
-      tmp.at() = val;
-      return tmp;
+    switch (device) {
+      case Device::GPU:
+        return dot_product_operation_(rhs, gpu_dot_product_operation_);
+      case Device::CPU:
+        return dot_product_operation_(rhs, cpu_dot_product_operation_);
     }
-
-    if (dimension() == 2 && rhs.dimension() == 2 &&
-        shape_[1] == rhs.shape_[0]) {
-      auto rows = shape_[0];
-      auto cols = rhs.shape_[1];
-      auto tmp = array::empty({rows, cols});
-
-      for (size_t row = 0; row < rows; row++) {
-        for (size_t col = 0; col < cols; col++) {
-          T val = 0;
-          for (size_t i = 0; i < shape_[1]; i++) {
-            val += at(row, i) * rhs.at(i, col);
-          }
-          tmp.at(row, col) = val;
-        }
-      }
-      return tmp;
-    }
-
-    if (dimension() == 1 && rhs.dimension() == 2 &&
-        shape_[0] == rhs.shape_[0]) {
-      auto rows = 1;
-      auto cols = rhs.shape_[1];
-      auto tmp = array::empty({cols});
-
-      for (size_t col = 0; col < cols; col++) {
-        T val = 0;
-        for (size_t i = 0; i < shape_[0]; i++) {
-          val += at(i) * rhs.at(i, col);
-        }
-        tmp.at(col) = val;
-      }
-      return tmp;
-    }
-
-    if (dimension() == 2 && rhs.dimension() == 1 &&
-        shape_[1] == rhs.shape_[0]) {
-      auto rows = shape_[0];
-      auto tmp = array::empty({rows});
-
-      for (size_t row = 0; row < rows; row++) {
-        T val = 0;
-        for (size_t i = 0; i < shape_[1]; i++) {
-          val += at(row, i) * rhs.at(i);
-        }
-        tmp.at(row) = val;
-      }
-      return tmp;
-    }
-
-    throw std::runtime_error("array: can't do `dot` operation.");
   }
 
   //----------------------------------------------------------------------------
@@ -1180,6 +1124,9 @@ class array {
             return cb([](T lhs, T rhs) { return lhs * rhs; });
           case Operation::Div:
             return cb([](T lhs, T rhs) { return lhs / rhs; });
+          default:
+            assert(false);
+            break;
         }
       }([&](auto fn) {
         auto tmp = array::empty(lhs.shape());
@@ -1191,8 +1138,6 @@ class array {
     });
   }
 
-  //----------------------------------------------------------------------------
-
   static auto binary_operation_(const array &lhs, const array &rhs,
                                 Operation ope) {
     switch (device) {
@@ -1201,6 +1146,81 @@ class array {
       case Device::CPU:
         return cpu_binary_operation_(lhs, rhs, ope);
     }
+  }
+
+  //----------------------------------------------------------------------------
+
+  static array cpu_dot_product_operation_(const array &lhs, const array &rhs) {
+    auto rows = lhs.shape_[0];
+    auto cols = rhs.shape_[1];
+    auto m = lhs.shape_[1];
+    auto tmp = array::empty({rows, cols});
+
+    for (size_t row = 0; row < rows; row++) {
+      for (size_t col = 0; col < cols; col++) {
+        T val = 0;
+        for (size_t i = 0; i < m; i++) {
+          val += lhs.at(row, i) * rhs.at(i, col);
+        }
+        tmp.at(row, col) = val;
+      }
+    }
+    return tmp;
+  }
+
+  static array gpu_dot_product_operation_(const array &lhs, const array &rhs) {
+    auto tmp = array::empty({lhs.shape_[0], rhs.shape_[1]});
+
+    mtl::compute_dot<T>(
+        lhs.buf_, lhs.buf_off_ * sizeof(T), lhs.buf_len_ * sizeof(T), rhs.buf_,
+        rhs.buf_off_ * sizeof(T), rhs.buf_len_ * sizeof(T), tmp.buf_,
+        tmp.buf_off_ * sizeof(T), tmp.buf_len_ * sizeof(T), lhs.shape_[0],
+        rhs.shape_[1], lhs.shape_[1]);
+
+    return tmp;
+  }
+
+  template <typename U>
+  array dot_product_operation_(const array &rhs, U fn) const {
+    if (dimension() == 2 && rhs.dimension() == 2 &&
+        shape_[1] == rhs.shape_[0]) {
+      return fn(*this, rhs);
+    }
+
+    if (dimension() == 1 && rhs.dimension() == 2 &&
+        shape_[0] == rhs.shape_[0]) {
+      auto lhs2 = *this;
+      lhs2.reshape({1, shape_[0]});
+
+      auto tmp = fn(lhs2, rhs);
+      tmp.reshape({rhs.shape_[1]});
+      return tmp;
+    }
+
+    if (dimension() == 2 && rhs.dimension() == 1 &&
+        shape_[1] == rhs.shape_[0]) {
+      auto rhs2 = rhs;
+      rhs2.reshape({rhs.shape_[0], 1});
+
+      auto tmp = fn(*this, rhs2);
+      tmp.reshape({shape_[0]});
+      return tmp;
+    }
+
+    if (dimension() == 1 && rhs.dimension() == 1 &&
+        shape_[0] == rhs.shape_[0]) {
+      auto lhs2 = *this;
+      lhs2.reshape({1, shape_[0]});
+
+      auto rhs2 = rhs;
+      rhs2.reshape({rhs.shape_[0], 1});
+
+      auto tmp = fn(lhs2, rhs2);
+      tmp.reshape({});
+      return tmp;
+    }
+
+    throw std::runtime_error("array: can't do `dot` operation.");
   }
 };
 
