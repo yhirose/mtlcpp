@@ -15,7 +15,6 @@ void add() {
 
   auto a = mtl::ones<float>({n});
   auto b = mtl::ones<float>({n});
-  auto e = mtl::array<float>({n}, 2);
   auto c = mtl::array<float>();
 
   mtl::device = mtl::Device::CPU;
@@ -34,7 +33,6 @@ void add() {
 void dot() {
   auto a = mtl::ones<float>({1000, 1000});
   auto b = mtl::ones<float>({1000, 100});
-  auto e = mtl::array<float>({1000, 100}, 1000);
   auto c = mtl::array<float>();
 
   mtl::device = mtl::Device::CPU;

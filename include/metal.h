@@ -1,11 +1,17 @@
 #pragma once
 
-#include <common.h>
-
 #include <Metal/Metal.hpp>
+#include <numeric>
 #include <sstream>
 
 namespace mtl {
+
+template <typename T>
+concept value_type =
+    std::same_as<T, float> || std::same_as<T, int> || std::same_as<T, bool>;
+
+template <typename T>
+concept arithmetic = std::is_arithmetic_v<T>;
 
 template <typename T>
 struct releaser {
@@ -27,34 +33,57 @@ inline auto managed(T* p) {
 template <typename T>
 using managed_ptr = std::shared_ptr<T>;
 
+struct storage {
+  managed_ptr<MTL::Buffer> buf;
+  size_t off = 0;
+  size_t len = 0;
+};
+
 //-----------------------------------------------------------------------------
 
 class metal {
  public:
   metal(MTL::Device* device);
 
-  managed_ptr<MTL::Buffer> newBuffer(NS::UInteger length);
+  managed_ptr<MTL::Buffer> make_buffer(NS::UInteger length);
 
   template <value_type T>
-  void compute(MTL::Buffer* A, size_t A_offset, uint32_t A_bytes,
-               MTL::Buffer* B, size_t B_offset, uint32_t B_bytes,
-               MTL::Buffer* OUT, size_t OUT_offset, uint32_t OUT_bytes,
-               Operation ope);
+  void add(const storage& A, const storage& B, storage& OUT);
 
   template <value_type T>
-  void compute_dot(MTL::Buffer* A, size_t A_offset, uint32_t A_bytes,
-                   MTL::Buffer* B, size_t B_offset, uint32_t B_bytes,
-                   MTL::Buffer* OUT, size_t OUT_offset, uint32_t OUT_bytes,
-                   uint32_t OUT_rows, uint32_t OUT_cols, uint32_t m);
+  void sub(const storage& A, const storage& B, storage& OUT);
+
+  template <value_type T>
+  void mul(const storage& A, const storage& B, storage& OUT);
+
+  template <value_type T>
+  void div(const storage& A, const storage& B, storage& OUT);
+
+  template <value_type T>
+  void dot(const storage& A, const storage& B, storage& OUT, uint32_t OUT_rows,
+           uint32_t OUT_cols, uint32_t m);
 
  private:
+  enum class DataType {
+    Float = 0,
+    Integer,
+  };
+
   MTL::Device* device_;
-  std::vector<managed_ptr<MTL::ComputePipelineState>> states_;
   managed_ptr<MTL::CommandQueue> queue_;
 
-  void create_compute_pipeline_state_object_(MTL::Device* device,
-                                             managed_ptr<MTL::Library> library,
-                                             const char* name);
+  managed_ptr<MTL::ComputePipelineState> pso_add_;
+  managed_ptr<MTL::ComputePipelineState> pso_sub_;
+  managed_ptr<MTL::ComputePipelineState> pso_mul_;
+  managed_ptr<MTL::ComputePipelineState> pso_div_;
+  managed_ptr<MTL::ComputePipelineState> pso_dot_;
+
+  template <value_type T>
+  void arithmetic_operation_(const storage& A, const storage& B, storage& OUT,
+                             managed_ptr<MTL::ComputePipelineState> pso);
+
+  managed_ptr<MTL::ComputePipelineState> create_compute_pipeline_state_object_(
+      MTL::Device* device, managed_ptr<MTL::Library> library, const char* name);
 };
 
 //-----------------------------------------------------------------------------
@@ -65,37 +94,33 @@ static const char* metal_source_ = R"(
 
 using namespace metal;
 
-template <typename T>
-uint broadcast_offset(uint index, uint bytes)
-{
-  return index % (bytes / sizeof(T));
-}
-
 template <typename Ope, typename T>
-void compute(
+void arithmetic_operation_(
   device const void* A,
   device const void* B,
   device void* OUT,
-  constant uint32_t& A_bytes,
-  constant uint32_t& B_bytes,
+  constant uint32_t& A_length,
+  constant uint32_t& B_length,
   uint index)
 {
   auto A_arr = static_cast<device const T*>(A);
   auto B_arr = static_cast<device const T*>(B);
   auto OUT_arr = reinterpret_cast<device T*>(OUT);
 
-  OUT_arr[index] = Ope()(
-    A_arr[broadcast_offset<T>(index, A_bytes)],
-    B_arr[broadcast_offset<T>(index, B_bytes)]);
+  // broadcast offset
+  auto A_index = index % A_length;
+  auto B_index = index % B_length;
+
+  OUT_arr[index] = Ope()(A_arr[A_index], B_arr[B_index]);
 }
 
-template <typename T> struct add { T operator()(T a, T b) { return a + b; } };
-template <typename T> struct sub { T operator()(T a, T b) { return a - b; } };
-template <typename T> struct mul { T operator()(T a, T b) { return a * b; } };
-template <typename T> struct div { T operator()(T a, T b) { return a / b; } };
+template <typename T> struct add_ { T operator()(T a, T b) { return a + b; } };
+template <typename T> struct sub_ { T operator()(T a, T b) { return a - b; } };
+template <typename T> struct mul_ { T operator()(T a, T b) { return a * b; } };
+template <typename T> struct div_ { T operator()(T a, T b) { return a / b; } };
 
 template <typename T>
-void compute_dot(
+void dot_operatoin(
   device const void* A,
   device const void* B,
   device void* OUT,
@@ -123,71 +148,71 @@ void compute_dot(
 
 constant uint32_t Float = 0;
 
-kernel void array_add(
+kernel void add(
   device const void* A,
   device const void* B,
   device void* OUT,
-  constant uint32_t& A_bytes,
-  constant uint32_t& B_bytes,
+  constant uint32_t& A_length,
+  constant uint32_t& B_length,
   constant uint32_t& dtype,
   uint index [[thread_position_in_grid]])
 {
   if (dtype == Float) {
-    compute<add<float>, float>(A, B, OUT, A_bytes, B_bytes, index);
+    arithmetic_operation_<add_<float>, float>(A, B, OUT, A_length, B_length, index);
   } else {
-    compute<add<int>, int>(A, B, OUT, A_bytes, B_bytes, index);
+    arithmetic_operation_<add_<int>, int>(A, B, OUT, A_length, B_length, index);
   }
 }
 
-kernel void array_sub(
+kernel void sub(
   device const void* A,
   device const void* B,
   device void* OUT,
-  constant uint32_t& A_bytes,
-  constant uint32_t& B_bytes,
+  constant uint32_t& A_length,
+  constant uint32_t& B_length,
   constant uint32_t& dtype,
   uint index [[thread_position_in_grid]])
 {
   if (dtype == Float) {
-    compute<sub<float>, float>(A, B, OUT, A_bytes, B_bytes, index);
+    arithmetic_operation_<sub_<float>, float>(A, B, OUT, A_length, B_length, index);
   } else {
-    compute<sub<int>, int>(A, B, OUT, A_bytes, B_bytes, index);
+    arithmetic_operation_<sub_<int>, int>(A, B, OUT, A_length, B_length, index);
   }
 }
 
-kernel void array_mul(
+kernel void mul(
   device const void* A,
   device const void* B,
   device void* OUT,
-  constant uint32_t& A_bytes,
-  constant uint32_t& B_bytes,
+  constant uint32_t& A_length,
+  constant uint32_t& B_length,
   constant uint32_t& dtype,
   uint index [[thread_position_in_grid]])
 {
   if (dtype == Float) {
-    compute<mul<float>, float>(A, B, OUT, A_bytes, B_bytes, index);
+    arithmetic_operation_<mul_<float>, float>(A, B, OUT, A_length, B_length, index);
   } else {
-    compute<mul<int>, int>(A, B, OUT, A_bytes, B_bytes, index);
+    arithmetic_operation_<mul_<int>, int>(A, B, OUT, A_length, B_length, index);
   }
 }
 
-kernel void array_div(
+kernel void div(
   device const void* A,
   device const void* B,
   device void* OUT,
-  constant uint32_t& A_bytes,
-  constant uint32_t& B_bytes,
+  constant uint32_t& A_length,
+  constant uint32_t& B_length,
   constant uint32_t& dtype,
   uint index [[thread_position_in_grid]])
 {
   if (dtype == Float) {
-    compute<div<float>, float>(A, B, OUT, A_bytes, B_bytes, index);
+    arithmetic_operation_<div_<float>, float>(A, B, OUT, A_length, B_length, index);
   } else {
-    compute<div<int>, int>(A, B, OUT, A_bytes, B_bytes, index);
+    arithmetic_operation_<div_<int>, int>(A, B, OUT, A_length, B_length, index);
   }
 }
 
-kernel void array_dot(
+kernel void dot(
   device const void* A,
   device const void* B,
   device void* OUT,
@@ -198,9 +223,9 @@ kernel void array_dot(
   uint index [[thread_position_in_grid]])
 {
   if (dtype == Float) {
-    compute_dot<float>(A, B, OUT, OUT_rows, OUT_cols, m, index);
+    dot_operatoin<float>(A, B, OUT, OUT_rows, OUT_cols, m, index);
   } else {
-    compute_dot<int>(A, B, OUT, OUT_rows, OUT_cols, m, index);
+    dot_operatoin<int>(A, B, OUT, OUT_rows, OUT_cols, m, index);
   }
 }
 
@@ -211,7 +236,6 @@ kernel void array_dot(
 inline metal::metal(MTL::Device* device) : device_(device) {
   if (device == nullptr) {
     throw std::runtime_error("metal: Failed to create the default library.");
-    return;
   }
 
   // Compile a Metal library
@@ -223,70 +247,51 @@ inline metal::metal(MTL::Device* device) : device_(device) {
     std::stringstream ss;
     ss << "metal: Failed to compile the Metal library, error " << error << ".";
     throw std::runtime_error(ss.str());
-    return;
   }
 
   // Create pipeline state objects
-  create_compute_pipeline_state_object_(device, lib, "array_add");
-  create_compute_pipeline_state_object_(device, lib, "array_sub");
-  create_compute_pipeline_state_object_(device, lib, "array_mul");
-  create_compute_pipeline_state_object_(device, lib, "array_div");
-  create_compute_pipeline_state_object_(device, lib, "array_dot");
+  pso_add_ = create_compute_pipeline_state_object_(device, lib, "add");
+  pso_sub_ = create_compute_pipeline_state_object_(device, lib, "sub");
+  pso_mul_ = create_compute_pipeline_state_object_(device, lib, "mul");
+  pso_div_ = create_compute_pipeline_state_object_(device, lib, "div");
+  pso_dot_ = create_compute_pipeline_state_object_(device, lib, "dot");
 
   // Create a command queue
   queue_ = managed(device->newCommandQueue());
 
   if (queue_ == nullptr) {
     throw std::runtime_error("metal: Failed to find the command queue.");
-    return;
   }
 }
 
-inline managed_ptr<MTL::Buffer> metal::newBuffer(NS::UInteger length) {
+inline managed_ptr<MTL::Buffer> metal::make_buffer(NS::UInteger length) {
   return managed(device_->newBuffer(length, MTL::ResourceStorageModeShared));
 }
 
 template <value_type T>
-inline void metal::compute(MTL::Buffer* A, size_t A_offset, uint32_t A_bytes,
-                           MTL::Buffer* B, size_t B_offset, uint32_t B_bytes,
-                           MTL::Buffer* OUT, size_t OUT_offset,
-                           uint32_t OUT_bytes, Operation ope) {
-  auto pso = states_[static_cast<size_t>(ope)];
-  auto dtype = std::is_same_v<T, float>
-                   ? static_cast<uint32_t>(DataType::Float)
-                   : static_cast<uint32_t>(DataType::Integer);
-
-  auto commandBuffer = queue_->commandBuffer();
-  auto computeEncoder = commandBuffer->computeCommandEncoder();
-
-  computeEncoder->setComputePipelineState(pso.get());
-  computeEncoder->setBuffer(A, A_offset, 0);
-  computeEncoder->setBuffer(B, B_offset, 1);
-  computeEncoder->setBuffer(OUT, OUT_offset, 2);
-  computeEncoder->setBytes(&A_bytes, sizeof(uint32_t), 3);
-  computeEncoder->setBytes(&B_bytes, sizeof(uint32_t), 4);
-  computeEncoder->setBytes(&dtype, sizeof(uint32_t), 5);
-
-  auto length = OUT_bytes / sizeof(T);
-  auto grid_size = MTL::Size::Make(length, 1, 1);
-  auto threads_size = std::min(pso->maxTotalThreadsPerThreadgroup(), length);
-
-  computeEncoder->dispatchThreads(grid_size,
-                                  MTL::Size::Make(threads_size, 1, 1));
-
-  computeEncoder->endEncoding();
-  commandBuffer->commit();
-  commandBuffer->waitUntilCompleted();
+inline void metal::add(const storage& A, const storage& B, storage& OUT) {
+  arithmetic_operation_<T>(A, B, OUT, pso_add_);
 }
 
 template <value_type T>
-inline void metal::compute_dot(MTL::Buffer* A, size_t A_offset,
-                               uint32_t A_bytes, MTL::Buffer* B,
-                               size_t B_offset, uint32_t B_bytes,
-                               MTL::Buffer* OUT, size_t OUT_offset,
-                               uint32_t OUT_bytes, uint32_t OUT_rows,
-                               uint32_t OUT_cols, uint32_t m) {
-  auto pso = states_[static_cast<size_t>(Operation::Dot)];
+inline void metal::sub(const storage& A, const storage& B, storage& OUT) {
+  arithmetic_operation_<T>(A, B, OUT, pso_sub_);
+}
+
+template <value_type T>
+inline void metal::mul(const storage& A, const storage& B, storage& OUT) {
+  arithmetic_operation_<T>(A, B, OUT, pso_mul_);
+}
+
+template <value_type T>
+inline void metal::div(const storage& A, const storage& B, storage& OUT) {
+  arithmetic_operation_<T>(A, B, OUT, pso_div_);
+}
+
+template <value_type T>
+inline void metal::dot(const storage& A, const storage& B, storage& OUT,
+                       uint32_t OUT_rows, uint32_t OUT_cols, uint32_t m) {
+  auto pso = pso_dot_;
   auto dtype = std::is_same_v<T, float>
                    ? static_cast<uint32_t>(DataType::Float)
                    : static_cast<uint32_t>(DataType::Integer);
@@ -295,17 +300,17 @@ inline void metal::compute_dot(MTL::Buffer* A, size_t A_offset,
   auto computeEncoder = commandBuffer->computeCommandEncoder();
 
   computeEncoder->setComputePipelineState(pso.get());
-  computeEncoder->setBuffer(A, A_offset, 0);
-  computeEncoder->setBuffer(B, B_offset, 1);
-  computeEncoder->setBuffer(OUT, OUT_offset, 2);
+  computeEncoder->setBuffer(A.buf.get(), A.off * sizeof(T), 0);
+  computeEncoder->setBuffer(B.buf.get(), B.off * sizeof(T), 1);
+  computeEncoder->setBuffer(OUT.buf.get(), OUT.off * sizeof(T), 2);
   computeEncoder->setBytes(&OUT_rows, sizeof(uint32_t), 3);
   computeEncoder->setBytes(&OUT_cols, sizeof(uint32_t), 4);
   computeEncoder->setBytes(&m, sizeof(uint32_t), 5);
   computeEncoder->setBytes(&dtype, sizeof(uint32_t), 6);
 
-  auto length = OUT_bytes / sizeof(T);
-  auto grid_size = MTL::Size::Make(length, 1, 1);
-  auto threads_size = std::min(pso->maxTotalThreadsPerThreadgroup(), length);
+  auto grid_size = MTL::Size::Make(OUT.len, 1, 1);
+  auto threads_size =
+      std::min<size_t>(pso->maxTotalThreadsPerThreadgroup(), OUT.len);
 
   computeEncoder->dispatchThreads(grid_size,
                                   MTL::Size::Make(threads_size, 1, 1));
@@ -315,8 +320,41 @@ inline void metal::compute_dot(MTL::Buffer* A, size_t A_offset,
   commandBuffer->waitUntilCompleted();
 }
 
-inline void metal::create_compute_pipeline_state_object_(
-    MTL::Device* device, managed_ptr<MTL::Library> library, const char* name) {
+template <value_type T>
+inline void metal::arithmetic_operation_(
+    const storage& A, const storage& B, storage& OUT,
+    managed_ptr<MTL::ComputePipelineState> pso) {
+  auto dtype = std::is_same_v<T, float>
+                   ? static_cast<uint32_t>(DataType::Float)
+                   : static_cast<uint32_t>(DataType::Integer);
+
+  auto commandBuffer = queue_->commandBuffer();
+  auto computeEncoder = commandBuffer->computeCommandEncoder();
+
+  computeEncoder->setComputePipelineState(pso.get());
+  computeEncoder->setBuffer(A.buf.get(), A.off * sizeof(T), 0);
+  computeEncoder->setBuffer(B.buf.get(), B.off * sizeof(T), 1);
+  computeEncoder->setBuffer(OUT.buf.get(), OUT.off * sizeof(T), 2);
+  computeEncoder->setBytes(&A.len, sizeof(uint32_t), 3);
+  computeEncoder->setBytes(&B.len, sizeof(uint32_t), 4);
+  computeEncoder->setBytes(&dtype, sizeof(uint32_t), 5);
+
+  auto grid_size = MTL::Size::Make(OUT.len, 1, 1);
+  auto threads_size =
+      std::min<size_t>(pso->maxTotalThreadsPerThreadgroup(), OUT.len);
+
+  computeEncoder->dispatchThreads(grid_size,
+                                  MTL::Size::Make(threads_size, 1, 1));
+
+  computeEncoder->endEncoding();
+  commandBuffer->commit();
+  commandBuffer->waitUntilCompleted();
+}
+
+inline managed_ptr<MTL::ComputePipelineState>
+metal::create_compute_pipeline_state_object_(MTL::Device* device,
+                                             managed_ptr<MTL::Library> library,
+                                             const char* name) {
   auto str = NS::String::string(name, NS::ASCIIStringEncoding);
   auto fn = managed(library->newFunction(str));
 
@@ -324,7 +362,6 @@ inline void metal::create_compute_pipeline_state_object_(
     std::stringstream ss;
     ss << "metal: Failed to find the " << name << " function.";
     throw std::runtime_error(ss.str());
-    return;
   }
 
   NS::Error* error = nullptr;
@@ -335,10 +372,9 @@ inline void metal::create_compute_pipeline_state_object_(
     ss << "metal: Failed to created pipeline state object, error " << error
        << ".";
     throw std::runtime_error(ss.str());
-    return;
   }
 
-  states_.push_back(pso);
+  return pso;
 }
 
 inline metal& singleton_instance_() {
@@ -347,31 +383,36 @@ inline metal& singleton_instance_() {
   return metal_;
 }
 
-inline managed_ptr<MTL::Buffer> newBuffer(NS::UInteger length) {
-  return singleton_instance_().newBuffer(length);
+//-----------------------------------------------------------------------------
+
+inline managed_ptr<MTL::Buffer> make_buffer(NS::UInteger length) {
+  return singleton_instance_().make_buffer(length);
 }
 
 template <typename T>
-inline void compute(managed_ptr<MTL::Buffer> A, size_t A_offset,
-                    uint32_t A_bytes, managed_ptr<MTL::Buffer> B,
-                    size_t B_offset, uint32_t B_bytes,
-                    managed_ptr<MTL::Buffer> OUT, size_t OUT_offset,
-                    uint32_t OUT_bytes, Operation ope) {
-  return singleton_instance_().compute<T>(A.get(), A_offset, A_bytes, B.get(),
-                                          B_offset, B_bytes, OUT.get(),
-                                          OUT_offset, OUT_bytes, ope);
+inline void add(const storage& A, const storage& B, storage& OUT) {
+  return singleton_instance_().add<T>(A, B, OUT);
 }
 
 template <typename T>
-inline void compute_dot(managed_ptr<MTL::Buffer> A, size_t A_offset,
-                        uint32_t A_bytes, managed_ptr<MTL::Buffer> B,
-                        size_t B_offset, uint32_t B_bytes,
-                        managed_ptr<MTL::Buffer> OUT, size_t OUT_offset,
-                        uint32_t OUT_bytes, uint32_t OUT_rows,
-                        uint32_t OUT_cols, uint32_t m) {
-  return singleton_instance_().compute_dot<T>(
-      A.get(), A_offset, A_bytes, B.get(), B_offset, B_bytes, OUT.get(),
-      OUT_offset, OUT_bytes, OUT_rows, OUT_cols, m);
+inline void sub(const storage& A, const storage& B, storage& OUT) {
+  return singleton_instance_().sub<T>(A, B, OUT);
+}
+
+template <typename T>
+inline void mul(const storage& A, const storage& B, storage& OUT) {
+  return singleton_instance_().mul<T>(A, B, OUT);
+}
+
+template <typename T>
+inline void div(const storage& A, const storage& B, storage& OUT) {
+  return singleton_instance_().div<T>(A, B, OUT);
+}
+
+template <typename T>
+inline void dot(const storage& A, const storage& B, storage& OUT,
+                uint32_t OUT_rows, uint32_t OUT_cols, uint32_t m) {
+  return singleton_instance_().dot<T>(A, B, OUT, OUT_rows, OUT_cols, m);
 }
 
 };  // namespace mtl

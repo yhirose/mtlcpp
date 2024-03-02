@@ -104,6 +104,13 @@ constexpr size_t nested_initializer_item_count_(std::initializer_list<T> l) {
 template <typename T, size_t I>
 using nested_initializer_list = nested_initializer_list_<T, I>::type;
 
+enum class ArithmeticOperation_ {
+  Add = 0,
+  Sub,
+  Mul,
+  Div,
+};
+
 //------------------------------------------------------------------------------
 
 template <value_type T>
@@ -111,10 +118,7 @@ class array {
  private:
   shape_type shape_;
   strides_type strides_;
-
-  mtl::managed_ptr<MTL::Buffer> buf_;
-  size_t buf_off_ = 0;
-  size_t buf_len_ = 0;
+  mtl::storage storage_;
 
  public:
   array() = default;
@@ -191,14 +195,16 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  size_t buffer_element_count() const { return buf_len_; }
+  size_t buffer_element_count() const { return storage_.len; }
 
-  size_t buffer_bytes() const { return buf_len_ * sizeof(T); }
+  size_t buffer_bytes() const { return storage_.len * sizeof(T); }
 
-  T *buffer_data() { return static_cast<T *>(buf_->contents()) + buf_off_; }
+  T *buffer_data() {
+    return static_cast<T *>(storage_.buf->contents()) + storage_.off;
+  }
 
   const T *buffer_data() const {
-    return static_cast<const T *>(buf_->contents()) + buf_off_;
+    return static_cast<const T *>(storage_.buf->contents()) + storage_.off;
   }
 
   //----------------------------------------------------------------------------
@@ -347,8 +353,8 @@ class array {
     tmp.reshape(s);
 
     auto stride = strides_[0];
-    tmp.buf_off_ = buf_off_ + stride * row;
-    tmp.buf_len_ = stride;
+    tmp.storage_.off = storage_.off + stride * row;
+    tmp.storage_.len = stride;
     return tmp;
   }
 
@@ -646,19 +652,19 @@ class array {
   //----------------------------------------------------------------------------
 
   friend array operator+(const array &lhs, const array &rhs) {
-    return binary_operation_(lhs, rhs, Operation::Add);
+    return arithmetic_operation_(lhs, rhs, ArithmeticOperation_::Add);
   }
 
   friend array operator-(const array &lhs, const array &rhs) {
-    return binary_operation_(lhs, rhs, Operation::Sub);
+    return arithmetic_operation_(lhs, rhs, ArithmeticOperation_::Sub);
   }
 
   friend array operator*(const array &lhs, const array &rhs) {
-    return binary_operation_(lhs, rhs, Operation::Mul);
+    return arithmetic_operation_(lhs, rhs, ArithmeticOperation_::Mul);
   }
 
   friend array operator/(const array &lhs, const array &rhs) {
-    return binary_operation_(lhs, rhs, Operation::Div);
+    return arithmetic_operation_(lhs, rhs, ArithmeticOperation_::Div);
   }
 
   //------------------------------------------------------------------------------
@@ -795,9 +801,9 @@ class array {
   array dot(const array &rhs) const {
     switch (device) {
       case Device::GPU:
-        return dot_product_operation_(rhs, gpu_dot_product_operation_);
+        return dot_operation_(rhs, gpu_dot_operation_);
       case Device::CPU:
-        return dot_product_operation_(rhs, cpu_dot_product_operation_);
+        return dot_operation_(rhs, cpu_dot_operation_);
     }
   }
 
@@ -1028,9 +1034,9 @@ class array {
   }
 
   void allocate_buffer_() {
-    buf_off_ = 0;
-    buf_len_ = element_count();
-    buf_ = mtl::newBuffer(buf_len_ * sizeof(T));
+    storage_.off = 0;
+    storage_.len = element_count();
+    storage_.buf = mtl::make_buffer(storage_.len * sizeof(T));
   }
 
   void copy_initializer_list_(const auto &l) {
@@ -1099,30 +1105,43 @@ class array {
     throw std::runtime_error("array: invalid operation.");
   }
 
-  static auto gpu_binary_operation_(const array &lhs, const array &rhs,
-                                    Operation ope) {
+  static auto gpu_arithmetic_operation_(const array &lhs, const array &rhs,
+                                        ArithmeticOperation_ ope) {
     return broadcast_(lhs, rhs, [ope](const auto &lhs, const auto &rhs) {
       auto tmp = array::empty(lhs.shape());
-      mtl::compute<T>(
-          lhs.buf_, lhs.buf_off_ * sizeof(T), lhs.buf_len_ * sizeof(T),
-          rhs.buf_, rhs.buf_off_ * sizeof(T), rhs.buf_len_ * sizeof(T),
-          tmp.buf_, tmp.buf_off_ * sizeof(T), tmp.buf_len_ * sizeof(T), ope);
+      switch (ope) {
+        case ArithmeticOperation_::Add:
+          mtl::add<T>(lhs.storage_, rhs.storage_, tmp.storage_);
+          break;
+        case ArithmeticOperation_::Sub:
+          mtl::sub<T>(lhs.storage_, rhs.storage_, tmp.storage_);
+          break;
+        case ArithmeticOperation_::Mul:
+          mtl::mul<T>(lhs.storage_, rhs.storage_, tmp.storage_);
+          break;
+        case ArithmeticOperation_::Div:
+          mtl::div<T>(lhs.storage_, rhs.storage_, tmp.storage_);
+          break;
+        default:
+          assert(false);
+          break;
+      }
       return tmp;
     });
   }
 
-  static auto cpu_binary_operation_(const array &lhs, const array &rhs,
-                                    Operation ope) {
+  static auto cpu_arithmetic_operation_(const array &lhs, const array &rhs,
+                                        ArithmeticOperation_ ope) {
     return broadcast_(lhs, rhs, [ope](const auto &lhs, const auto &rhs) {
       return [ope](auto cb) {
         switch (ope) {
-          case Operation::Add:
+          case ArithmeticOperation_::Add:
             return cb([](T lhs, T rhs) { return lhs + rhs; });
-          case Operation::Sub:
+          case ArithmeticOperation_::Sub:
             return cb([](T lhs, T rhs) { return lhs - rhs; });
-          case Operation::Mul:
+          case ArithmeticOperation_::Mul:
             return cb([](T lhs, T rhs) { return lhs * rhs; });
-          case Operation::Div:
+          case ArithmeticOperation_::Div:
             return cb([](T lhs, T rhs) { return lhs / rhs; });
           default:
             assert(false);
@@ -1138,19 +1157,19 @@ class array {
     });
   }
 
-  static auto binary_operation_(const array &lhs, const array &rhs,
-                                Operation ope) {
+  static auto arithmetic_operation_(const array &lhs, const array &rhs,
+                                    ArithmeticOperation_ ope) {
     switch (device) {
       case Device::GPU:
-        return gpu_binary_operation_(lhs, rhs, ope);
+        return gpu_arithmetic_operation_(lhs, rhs, ope);
       case Device::CPU:
-        return cpu_binary_operation_(lhs, rhs, ope);
+        return cpu_arithmetic_operation_(lhs, rhs, ope);
     }
   }
 
   //----------------------------------------------------------------------------
 
-  static array cpu_dot_product_operation_(const array &lhs, const array &rhs) {
+  static array cpu_dot_operation_(const array &lhs, const array &rhs) {
     auto rows = lhs.shape_[0];
     auto cols = rhs.shape_[1];
     auto m = lhs.shape_[1];
@@ -1168,20 +1187,17 @@ class array {
     return tmp;
   }
 
-  static array gpu_dot_product_operation_(const array &lhs, const array &rhs) {
+  static array gpu_dot_operation_(const array &lhs, const array &rhs) {
     auto tmp = array::empty({lhs.shape_[0], rhs.shape_[1]});
 
-    mtl::compute_dot<T>(
-        lhs.buf_, lhs.buf_off_ * sizeof(T), lhs.buf_len_ * sizeof(T), rhs.buf_,
-        rhs.buf_off_ * sizeof(T), rhs.buf_len_ * sizeof(T), tmp.buf_,
-        tmp.buf_off_ * sizeof(T), tmp.buf_len_ * sizeof(T), lhs.shape_[0],
-        rhs.shape_[1], lhs.shape_[1]);
+    mtl::dot<T>(lhs.storage_, rhs.storage_, tmp.storage_, lhs.shape_[0],
+                rhs.shape_[1], lhs.shape_[1]);
 
     return tmp;
   }
 
   template <typename U>
-  array dot_product_operation_(const array &rhs, U fn) const {
+  array dot_operation_(const array &rhs, U fn) const {
     if (dimension() == 2 && rhs.dimension() == 2 &&
         shape_[1] == rhs.shape_[0]) {
       return fn(*this, rhs);

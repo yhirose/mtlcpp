@@ -1,134 +1,121 @@
 mtlcpp
 ======
 
-A C++20 linear algebra library for Metal on MacOS
+A header-only C++20 linear algebra library for Metal on MacOS
 
- * This project is still in development and is far from reaching the first alpha version. :)
- * Data types supported in this library are `int` and `float` only, since Metal doesn't support `double`.
+ * This project is still in development and is far from reaching the first alpha version :)
+ * Data types supported in this library are `int` and `float` only, since Metal doesn't support `double`
+ * This library uses GPU cores in Apple M1 chip with [Metal-cpp](https://developer.apple.com/metal/cpp/)
 
-Build and run unit tests
-------------------------
+Build and run unit tests and benchmark
+--------------------------------------
 
  * Install Xcode Command Line Tools
  * Run the following commands in Terminal
 
 ```bash
 cd test
-make test && ./test
+make
 ```
 
-Example
--------
+Benchmark as of 3/2/2024 on M1 MacBook Pro 14
+---------------------------------------------
+
+|               ns/op |                op/s | benchmark
+|--------------------:|--------------------:|:----------
+|      150,856,709.00 |                6.63 | CPU: `a + b`
+|        2,262,442.07 |              442.00 | GPU: `a + b`
+|        1,351,401.59 |              739.97 | Eigen: `a + b`
+|      964,220,500.00 |                1.04 | CPU: `a.dot(b)`
+|        1,094,602.35 |              913.57 | GPU: `a.dot(b)`
+|        3,002,299.36 |              333.08 | Eigen: `a * b`
 
 ```cpp
-#include <array.h>
+// test/bench.cpp
 
-#include "doctest.h"
+// `add` benchmark
+const size_t n = 10'000'000;
 
-using namespace mtl;
+auto a = mtl::ones<float>({n});
+auto b = mtl::ones<float>({n});
+auto c = mtl::array<float>();
 
-TEST_CASE("create empty array") {
-  auto i = empty<int>({2, 3, 2});
-  auto f = empty<float>({2, 3, 2});
-  // auto d = empty<double>({2, 3}); // cannot compile...
-}
+mtl::device = mtl::Device::CPU;
+Bench().run("CPU: a + b", [&] {
+  c = a + b;
+});
 
-TEST_CASE("create array with constants") {
-  auto s = array<float>(1);
-  auto v = array<float>{1, 2, 3, 4, 5, 6};
-  auto m = array<float>{{1, 2}, {3, 4}, {5, 6}};
-  auto t = array<float>{{{1, 2}, {3, 4}, {5, 6}}, {{7, 8}, {9, 10}, {11, 12}}};
+mtl::device = mtl::Device::GPU;
+Bench().run("GPU: a + b", [&] {
+  c = a + b;
+});
 
-  std::cout << s.print_info() << std::endl << s << std::endl << std::endl;
-  std::cout << v.print_info() << std::endl << v << std::endl << std::endl;
-  std::cout << m.print_info() << std::endl << m << std::endl << std::endl;
-  std::cout << t.print_info() << std::endl << t << std::endl << std::endl;
+auto aa = Eigen::Vector<float, Eigen::Dynamic>::Ones(n);
+auto bb = Eigen::Vector<float, Eigen::Dynamic>::Ones(n);
+auto cc = Eigen::Vector<float, Eigen::Dynamic>(n);
 
-  // dtype: float, dim: 0, shape: {}, strides: {1}
-  // 1
-  //
-  // dtype: float, dim: 1, shape: {6}, strides: {1}
-  // {1, 2, 3, 4, 5, 6}
-  //
-  // dtype: float, dim: 2, shape: {3, 2}, strides: {2, 1}
-  // {{1, 2},
-  //  {3, 4},
-  //  {5, 6}}
-  //
-  // dtype: float, dim: 3, shape: {2, 3, 2}, strides: {6, 2, 1}
-  // {{{1, 2},
-  //   {3, 4},
-  //   {5, 6}},
-  //
-  //  {{7, 8},
-  //   {9, 10},
-  //   {11, 12}}}
-}
+Bench().run("Eigen: a + b", [&] {
+  cc = aa + bb;
+});
 
-TEST_CASE("create array with shape") {
-  auto zeros1 = array<float>({2, 3, 2}, 0);
-  auto zeros2 = zeros<float>({2, 3, 2});
-  CHECK(array_equal(zeros1, zeros2));
+// `dot` benchmark
+auto a = mtl::ones<float>({1000, 1000});
+auto b = mtl::ones<float>({1000, 100});
+auto c = mtl::array<float>();
 
-  auto ones1 = array<float>({2, 3, 2}, 1);
-  auto ones2 = ones<float>({2, 3, 2});
-  CHECK(array_equal(ones1, ones2));
+mtl::device = mtl::Device::CPU;
+Bench().run("CPU: a.dot(b)", [&] {
+  c = a.dot(b);
+});
 
-  auto rand = random({2, 3, 2});
-  CHECK(rand.all([](auto val) { return 0 <= val && val < 1.0; }));
+mtl::device = mtl::Device::GPU;
+Bench().run("GPU: a.dot(b)", [&] {
+  c = a.dot(b);
+});
 
-  auto v = std::vector<float>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
-  auto from_iterator = array<float>({2, 3, 2}, v.begin());
-  auto from_range1 = array<float>({2, 3, 2}, v);
-  auto from_range2 = array<float>({2, 3, 2}, std::views::iota(1));
-  auto expected = array<float>({
-      {{1, 2}, {3, 4}, {5, 6}},
-      {{7, 8}, {9, 10}, {11, 12}},
-  });
-  CHECK(array_equal(from_iterator, expected));
-  CHECK(array_equal(from_range1, expected));
-  CHECK(array_equal(from_range2, expected));
-}
+auto aa = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>::Ones(1000, 1000);
+auto bb = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>::Ones(1000, 100);
+auto cc = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>();
 
-TEST_CASE("clone array") {
-  auto a = ones<float>({4});
-
-  auto cloned = a.clone();
-  cloned.zeros();
-  CHECK(array_equal(a, {1, 1, 1, 1}));
-
-  auto assigned = a;
-  assigned.zeros();
-  CHECK(array_equal(a, {0, 0, 0, 0}));
-}
-
-TEST_CASE("arithmatic operations") {
-  auto a = array<float>{{1, 2}, {3, 4}};
-  auto b = array<float>{{1, 2}, {3, 4}};
-
-  auto add = a + b;
-  CHECK(array_equal(add, {{2, 4}, {6, 8}}));
-
-  auto sub = a - b;
-  CHECK(array_equal(sub, {{0, 0}, {0, 0}}));
-
-  auto mul = a * b;
-  CHECK(array_equal(mul, {{1, 4}, {9, 16}}));
-
-  auto div = a / b;
-  CHECK(array_equal(div, {{1, 1}, {1, 1}}));
-}
-
-TEST_CASE("dot operation") {
-  auto x = array<float>{1, 2, 3};
-  auto W = array<float>{{1, 2}, {3, 4}, {5, 6}};
-
-  auto y = x.dot(W);
-  CHECK(array_equal(y, {22, 28}));
-}
+Bench().run("Eigen: a * b", [&] {
+  cc = aa * bb;
+});
 ```
+
+Operations
+----------
+
+### GPU and CPU
+
+ * `+` (add)
+ * `-` (sub)
+ * `*` (mul)
+ * `/` (div)
+ * `dot` (dot product)
+
+### CPU only
+
+ * `==`
+ * `clone`
+ * `constants`
+ * `empty`
+ * `zeros`
+ * `ones`
+ * `random`
+ * `transpose`
+ * `sigmoid`
+ * `sum`
+ * `mean`
+ * `min`
+ * `max`
+ * `count`
+ * `all`
+ * `softmax`
+ * `argmax`
+ * `array_equal`
+ * `allclose`
 
 License
 -------
 
-MIT license (© 2023 Yuji Hirose)
+MIT license (© 2024 Yuji Hirose)
