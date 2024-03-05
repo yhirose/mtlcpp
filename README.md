@@ -40,12 +40,12 @@ auto a = mtl::ones<float>({n});
 auto b = mtl::ones<float>({n});
 auto c = mtl::array<float>();
 
-mtl::device = mtl::Device::CPU;
+mtl::use_cpu();
 Bench().run("CPU: a + b", [&] {
   c = a + b;
 });
 
-mtl::device = mtl::Device::GPU;
+mtl::use_gpu();
 Bench().run("GPU: a + b", [&] {
   c = a + b;
 });
@@ -63,12 +63,12 @@ auto a = mtl::ones<float>({1000, 1000});
 auto b = mtl::ones<float>({1000, 100});
 auto c = mtl::array<float>();
 
-mtl::device = mtl::Device::CPU;
+mtl::use_cpu();
 Bench().run("CPU: a.dot(b)", [&] {
   c = a.dot(b);
 });
 
-mtl::device = mtl::Device::GPU;
+mtl::use_gpu();
 Bench().run("GPU: a.dot(b)", [&] {
   c = a.dot(b);
 });

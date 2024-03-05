@@ -1,16 +1,16 @@
-#include <array.h>
+#include <mtlcpp.h>
 
 #include "doctest.h"
 
 using namespace mtl;
 
-TEST_CASE("readme: create empty array") {
+TEST_CASE("example: create empty array") {
   auto i = empty<int>({2, 3, 2});
   auto f = empty<float>({2, 3, 2});
   // auto d = empty<double>({2, 3}); // cannot compile...
 }
 
-TEST_CASE("readme: create array with constants") {
+TEST_CASE("example: create array with constants") {
   auto s = array<float>(1);
   auto v = array<float>{1, 2, 3, 4, 5, 6};
   auto m = array<float>{{1, 2}, {3, 4}, {5, 6}};
@@ -42,7 +42,7 @@ TEST_CASE("readme: create array with constants") {
   //   {11, 12}}}
 }
 
-TEST_CASE("readme: create array with shape") {
+TEST_CASE("example: create array with shape") {
   auto zeros1 = array<float>({2, 3, 2}, 0);
   auto zeros2 = zeros<float>({2, 3, 2});
   CHECK(array_equal(zeros1, zeros2));
@@ -67,7 +67,7 @@ TEST_CASE("readme: create array with shape") {
   CHECK(array_equal(from_range2, expected));
 }
 
-TEST_CASE("readme: clone array") {
+TEST_CASE("example: clone array") {
   auto a = ones<float>({4});
 
   auto cloned = a.clone();
@@ -79,7 +79,7 @@ TEST_CASE("readme: clone array") {
   CHECK(array_equal(a, {0, 0, 0, 0}));
 }
 
-TEST_CASE("readme: arithmatic operations") {
+TEST_CASE("example: arithmatic operations") {
   auto a = array<float>{{1, 2}, {3, 4}};
   auto b = array<float>{{1, 2}, {3, 4}};
 
@@ -96,7 +96,7 @@ TEST_CASE("readme: arithmatic operations") {
   CHECK(array_equal(div, {{1, 1}, {1, 1}}));
 }
 
-TEST_CASE("readme: dot operation") {
+TEST_CASE("example: dot operation") {
   auto x = array<float>{1, 2, 3};
   auto W = array<float>{{1, 2}, {3, 4}, {5, 6}};
 

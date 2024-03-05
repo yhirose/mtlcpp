@@ -1,7 +1,7 @@
 #define NS_PRIVATE_IMPLEMENTATION
 #define MTL_PRIVATE_IMPLEMENTATION
 
-#include <array.h>
+#include <mtlcpp.h>
 #include <sys/stat.h>
 
 #include <fstream>
@@ -186,7 +186,7 @@ int main(int argc, const char** argv) {
   try {
     if (argc > 1) {
       if (std::string("--cpu") == argv[1]) {
-        mtl::device = mtl::Device::CPU;
+        mtl::use_cpu();
       }
     }
 

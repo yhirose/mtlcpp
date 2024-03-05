@@ -2,7 +2,7 @@
 #define MTL_PRIVATE_IMPLEMENTATION
 #define ANKERL_NANOBENCH_IMPLEMENT
 
-#include <array.h>
+#include <mtlcpp.h>
 
 #include <eigen3/Eigen/Core>
 
@@ -17,10 +17,10 @@ void add() {
   auto b = mtl::ones<float>({n});
   auto c = mtl::array<float>();
 
-  mtl::device = mtl::Device::CPU;
+  mtl::use_cpu();
   Bench().run("CPU: a + b", [&] { c = a + b; });
 
-  mtl::device = mtl::Device::GPU;
+  mtl::use_gpu();
   Bench().minEpochIterations(100).run("GPU: a + b", [&] { c = a + b; });
 
   auto aa = Eigen::Vector<float, Eigen::Dynamic>::Ones(n);
@@ -35,10 +35,10 @@ void dot() {
   auto b = mtl::ones<float>({1000, 100});
   auto c = mtl::array<float>();
 
-  mtl::device = mtl::Device::CPU;
+  mtl::use_cpu();
   Bench().run("CPU: a.dot(b)", [&] { c = a.dot(b); });
 
-  mtl::device = mtl::Device::GPU;
+  mtl::use_gpu();
   Bench().minEpochIterations(100).run("GPU: a.dot(b)", [&] { c = a.dot(b); });
 
   auto aa =
