@@ -1534,7 +1534,7 @@ inline array<T> array<T>::gpu_dot_operation_(const array &lhs,
   auto tmp = array({lhs.shape_[0], rhs.shape_[1]}, T{});
 
   metal::default_device().dot<T>(lhs.storage_, rhs.storage_, tmp.storage_,
-                                 lhs.shape_[1], rhs.shape_[1]);
+                                 lhs.shape_[1], lhs.shape_[0], rhs.shape_[1]);
 
   return tmp;
 }

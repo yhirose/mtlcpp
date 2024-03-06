@@ -92,7 +92,7 @@ class metal {
 
   template <value_type T>
   void dot(const storage& A, const storage& B, storage& OUT, uint32_t A_cols,
-           uint32_t B_cols);
+           uint32_t OUT_rows, uint32_t OUT_cols);
 
   static metal& default_device() {
     static auto metal_ = metal(managed(MTL::CreateSystemDefaultDevice()));
@@ -140,17 +140,17 @@ void arithmetic_operation_(
   device void* OUT,
   constant uint32_t& A_length,
   constant uint32_t& B_length,
-  uint index)
+  uint gid)
 {
   auto A_arr = static_cast<device const T*>(A);
   auto B_arr = static_cast<device const T*>(B);
   auto OUT_arr = reinterpret_cast<device T*>(OUT);
 
   // broadcast offset
-  auto A_index = index % A_length;
-  auto B_index = index % B_length;
+  auto A_index = gid % A_length;
+  auto B_index = gid % B_length;
 
-  OUT_arr[index] = Ope()(A_arr[A_index], B_arr[B_index]);
+  OUT_arr[gid] = Ope()(A_arr[A_index], B_arr[B_index]);
 }
 
 template <typename T> struct add_ { T operator()(T a, T b) { return a + b; } };
@@ -164,24 +164,25 @@ void dot_operatoin(
   device const void* B,
   device void* OUT,
   constant uint32_t& A_cols,
-  constant uint32_t& B_cols,
-  uint index)
+  constant uint32_t& OUT_raws,
+  constant uint32_t& OUT_cols,
+  uint2 gid)
 {
   auto A_arr = static_cast<device const T*>(A);
   auto B_arr = static_cast<device const T*>(B);
   auto OUT_arr = reinterpret_cast<device T*>(OUT);
 
-  auto irow = index / B_cols;
-  auto icol = index % B_cols;
+  auto irow = gid.y;
+  auto icol = gid.x;
 
   T val{};
   for (uint32_t i = 0; i < A_cols; i++) {
     auto aval = A_arr[A_cols * irow + i];
-    auto bval = B_arr[B_cols * i + icol];
+    auto bval = B_arr[OUT_cols * i + icol];
     val += aval * bval;
   }
 
-  OUT_arr[index] = val;
+  OUT_arr[OUT_cols * irow + icol] = val;
 }
 
 constant uint32_t Float = 0;
@@ -193,12 +194,12 @@ kernel void add(
   constant uint32_t& A_length,
   constant uint32_t& B_length,
   constant uint32_t& dtype,
-  uint index [[thread_position_in_grid]])
+  uint gid [[thread_position_in_grid]])
 {
   if (dtype == Float) {
-    arithmetic_operation_<add_<float>, float>(A, B, OUT, A_length, B_length, index);
+    arithmetic_operation_<add_<float>, float>(A, B, OUT, A_length, B_length, gid);
   } else {
-    arithmetic_operation_<add_<int>, int>(A, B, OUT, A_length, B_length, index);
+    arithmetic_operation_<add_<int>, int>(A, B, OUT, A_length, B_length, gid);
   }
 }
 
@@ -209,12 +210,12 @@ kernel void sub(
   constant uint32_t& A_length,
   constant uint32_t& B_length,
   constant uint32_t& dtype,
-  uint index [[thread_position_in_grid]])
+  uint gid [[thread_position_in_grid]])
 {
   if (dtype == Float) {
-    arithmetic_operation_<sub_<float>, float>(A, B, OUT, A_length, B_length, index);
+    arithmetic_operation_<sub_<float>, float>(A, B, OUT, A_length, B_length, gid);
   } else {
-    arithmetic_operation_<sub_<int>, int>(A, B, OUT, A_length, B_length, index);
+    arithmetic_operation_<sub_<int>, int>(A, B, OUT, A_length, B_length, gid);
   }
 }
 
@@ -225,12 +226,12 @@ kernel void mul(
   constant uint32_t& A_length,
   constant uint32_t& B_length,
   constant uint32_t& dtype,
-  uint index [[thread_position_in_grid]])
+  uint gid [[thread_position_in_grid]])
 {
   if (dtype == Float) {
-    arithmetic_operation_<mul_<float>, float>(A, B, OUT, A_length, B_length, index);
+    arithmetic_operation_<mul_<float>, float>(A, B, OUT, A_length, B_length, gid);
   } else {
-    arithmetic_operation_<mul_<int>, int>(A, B, OUT, A_length, B_length, index);
+    arithmetic_operation_<mul_<int>, int>(A, B, OUT, A_length, B_length, gid);
   }
 }
 
@@ -241,12 +242,12 @@ kernel void div(
   constant uint32_t& A_length,
   constant uint32_t& B_length,
   constant uint32_t& dtype,
-  uint index [[thread_position_in_grid]])
+  uint gid [[thread_position_in_grid]])
 {
   if (dtype == Float) {
-    arithmetic_operation_<div_<float>, float>(A, B, OUT, A_length, B_length, index);
+    arithmetic_operation_<div_<float>, float>(A, B, OUT, A_length, B_length, gid);
   } else {
-    arithmetic_operation_<div_<int>, int>(A, B, OUT, A_length, B_length, index);
+    arithmetic_operation_<div_<int>, int>(A, B, OUT, A_length, B_length, gid);
   }
 }
 
@@ -255,14 +256,15 @@ kernel void dot(
   device const void* B,
   device void* OUT,
   constant uint32_t& A_cols,
-  constant uint32_t& B_cols,
+  constant uint32_t& OUT_raws,
+  constant uint32_t& OUT_cols,
   constant uint32_t& dtype,
-  uint index [[thread_position_in_grid]])
+  uint2 gid [[thread_position_in_grid]])
 {
   if (dtype == Float) {
-    dot_operatoin<float>(A, B, OUT, A_cols, B_cols, index);
+    dot_operatoin<float>(A, B, OUT, A_cols, OUT_raws, OUT_cols, gid);
   } else {
-    dot_operatoin<int>(A, B, OUT, A_cols, B_cols, index);
+    dot_operatoin<int>(A, B, OUT, A_cols, OUT_raws, OUT_cols, gid);
   }
 }
 
@@ -327,7 +329,7 @@ inline void metal::div(const storage& A, const storage& B, storage& OUT) {
 
 template <value_type T>
 inline void metal::dot(const storage& A, const storage& B, storage& OUT,
-                       uint32_t A_cols, uint32_t B_cols) {
+                       uint32_t A_cols, uint32_t OUT_rows, uint32_t OUT_cols) {
   auto pso = pso_dot_;
   auto dtype = std::is_same_v<T, float>
                    ? static_cast<uint32_t>(DataType::Float)
@@ -341,12 +343,14 @@ inline void metal::dot(const storage& A, const storage& B, storage& OUT,
   computeEncoder->setBuffer(B.buf.get(), B.off * sizeof(T), 1);
   computeEncoder->setBuffer(OUT.buf.get(), OUT.off * sizeof(T), 2);
   computeEncoder->setBytes(&A_cols, sizeof(uint32_t), 3);
-  computeEncoder->setBytes(&B_cols, sizeof(uint32_t), 4);
-  computeEncoder->setBytes(&dtype, sizeof(uint32_t), 5);
+  computeEncoder->setBytes(&OUT_rows, sizeof(uint32_t), 4);
+  computeEncoder->setBytes(&OUT_cols, sizeof(uint32_t), 5);
+  computeEncoder->setBytes(&dtype, sizeof(uint32_t), 6);
 
-  auto grid_size = MTL::Size::Make(OUT.len, 1, 1);
-  auto threads_size = MTL::Size::Make(
-      std::min<size_t>(pso->maxTotalThreadsPerThreadgroup(), OUT.len), 1, 1);
+  auto grid_size = MTL::Size::Make(OUT_cols, OUT_rows, 1);
+  auto w = pso->threadExecutionWidth();
+  auto h = pso->maxTotalThreadsPerThreadgroup() / w;
+  auto threads_size = MTL::Size::Make(w, h, 1);
 
   computeEncoder->dispatchThreads(grid_size, threads_size);
   computeEncoder->endEncoding();
@@ -375,8 +379,9 @@ inline void metal::arithmetic_operation_(
   computeEncoder->setBytes(&dtype, sizeof(uint32_t), 5);
 
   auto grid_size = MTL::Size::Make(OUT.len, 1, 1);
-  auto threads_size = MTL::Size::Make(
-      std::min<size_t>(pso->maxTotalThreadsPerThreadgroup(), OUT.len), 1, 1);
+  auto w = pso->threadExecutionWidth();
+  auto h = pso->maxTotalThreadsPerThreadgroup() / w;
+  auto threads_size = MTL::Size::Make(w, h, 1);
 
   computeEncoder->dispatchThreads(grid_size, threads_size);
   computeEncoder->endEncoding();

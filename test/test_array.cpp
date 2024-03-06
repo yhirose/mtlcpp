@@ -48,6 +48,7 @@ TEST_CASE("vector: container") {
 
   auto v2 = array<int>({a.size() + 1}, a);
   CHECK(v2.element_count() == 5);
+  CHECK(array_equal(v1, {1, 2, 3}));
 
   auto v3 = array<int>(a);
   CHECK(v3.element_count() == 4);
