@@ -32,10 +32,10 @@ inline auto managed(T* p) {
   return std::shared_ptr<T>(p, releaser<T>());
 }
 
-//-----------------------------------------------------------------------------
-
 template <typename T>
 using managed_ptr = std::shared_ptr<T>;
+
+//-----------------------------------------------------------------------------
 
 template <value_type T, size_t I>
 struct nested_initializer_list_ {
@@ -106,13 +106,14 @@ class metal {
   };
 
   managed_ptr<MTL::Device> device_;
-  managed_ptr<MTL::CommandQueue> queue_;
 
   managed_ptr<MTL::ComputePipelineState> pso_add_;
   managed_ptr<MTL::ComputePipelineState> pso_sub_;
   managed_ptr<MTL::ComputePipelineState> pso_mul_;
   managed_ptr<MTL::ComputePipelineState> pso_div_;
   managed_ptr<MTL::ComputePipelineState> pso_dot_;
+
+  managed_ptr<MTL::CommandQueue> queue_;
 
   template <value_type T>
   void arithmetic_operation_(const storage& A, const storage& B, storage& OUT,
