@@ -137,6 +137,8 @@ class array {
   array operator*(const array &rhs) const;
   array operator/(const array &rhs) const;
 
+  array pow(const array &rhs) const;
+
   //----------------------------------------------------------------------------
 
   array dot(const array &rhs) const;
@@ -210,6 +212,7 @@ class array {
     Sub,
     Mul,
     Div,
+    Pow,
   };
 
   static auto gpu_arithmetic_operation_(const array &lhs, const array &rhs,
@@ -1057,6 +1060,11 @@ inline array<T> array<T>::operator/(const array &rhs) const {
   return arithmetic_operation_(*this, rhs, ArithmeticOperation::Div);
 }
 
+template <value_type T>
+inline array<T> array<T>::pow(const array &rhs) const {
+  return arithmetic_operation_(*this, rhs, ArithmeticOperation::Pow);
+}
+
 //----------------------------------------------------------------------------
 
 template <value_type T>
@@ -1458,6 +1466,10 @@ inline auto array<T>::gpu_arithmetic_operation_(const array &lhs,
         metal::default_device().div<T>(lhs.storage_, rhs.storage_,
                                        tmp.storage_);
         break;
+      case ArithmeticOperation::Pow:
+        metal::default_device().pow<T>(lhs.storage_, rhs.storage_,
+                                       tmp.storage_);
+        break;
       default:
         assert(false);
         break;
@@ -1481,6 +1493,8 @@ inline auto array<T>::cpu_arithmetic_operation_(const array &lhs,
           return cb([](T lhs, T rhs) { return lhs * rhs; });
         case ArithmeticOperation::Div:
           return cb([](T lhs, T rhs) { return lhs / rhs; });
+        case ArithmeticOperation::Pow:
+          return cb([](T lhs, T rhs) { return std::pow(lhs, rhs); });
         default:
           assert(false);
           break;

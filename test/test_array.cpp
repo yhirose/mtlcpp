@@ -133,6 +133,21 @@ TEST_CASE("array: vector arithmatic operation errors") {
   CHECK_THROWS_WITH_AS(a + b, "array: invalid operation.", std::runtime_error);
 }
 
+TEST_CASE("array: vector `pow` operation") {
+  {
+    auto a = array<int>{1, 2, 3};
+    auto b = array<int>{2, 2, 2};
+    CHECK(array_equal(a.pow(b), {1, 4, 9}));
+    CHECK(array_equal(b.pow(a), {2, 4, 8}));
+  }
+  {
+    auto a = array<float>{1.0, 2.0, 3.0};
+    auto b = array<float>{2.0, 2.0, 2.0};
+    CHECK(allclose(a.pow(b), {1.0, 4.0, 9.0}));
+    CHECK(allclose(b.pow(a), {2.0, 4.0, 8.0}));
+  }
+}
+
 //------------------------------------------------------------------------------
 
 TEST_CASE("array: matrix size") {

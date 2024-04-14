@@ -91,6 +91,9 @@ class metal {
   void div(const storage& A, const storage& B, storage& OUT);
 
   template <value_type T>
+  void pow(const storage& A, const storage& B, storage& OUT);
+
+  template <value_type T>
   void dot(const storage& A, const storage& B, storage& OUT, uint32_t A_cols,
            uint32_t OUT_rows, uint32_t OUT_cols);
 
@@ -111,6 +114,7 @@ class metal {
   managed_ptr<MTL::ComputePipelineState> pso_sub_;
   managed_ptr<MTL::ComputePipelineState> pso_mul_;
   managed_ptr<MTL::ComputePipelineState> pso_div_;
+  managed_ptr<MTL::ComputePipelineState> pso_pow_;
   managed_ptr<MTL::ComputePipelineState> pso_dot_;
 
   managed_ptr<MTL::CommandQueue> queue_;
@@ -158,6 +162,11 @@ template <typename T> struct add_ { T operator()(T a, T b) { return a + b; } };
 template <typename T> struct sub_ { T operator()(T a, T b) { return a - b; } };
 template <typename T> struct mul_ { T operator()(T a, T b) { return a * b; } };
 template <typename T> struct div_ { T operator()(T a, T b) { return a / b; } };
+
+struct powf_ { float operator()(float a, float b) { return pow(a, b); } };
+struct powi_ { int operator()(int a, int b) {
+  return round(pow(static_cast<float>(a), static_cast<float>(b)));
+} };
 
 template <typename T>
 void dot_operatoin(
@@ -252,6 +261,22 @@ kernel void div(
   }
 }
 
+kernel void pow(
+  device const void* A,
+  device const void* B,
+  device void* OUT,
+  constant uint32_t& A_length,
+  constant uint32_t& B_length,
+  constant uint32_t& dtype,
+  uint gid [[thread_position_in_grid]])
+{
+  if (dtype == Float) {
+    arithmetic_operation_<powf_, float>(A, B, OUT, A_length, B_length, gid);
+  } else {
+    arithmetic_operation_<powi_, int>(A, B, OUT, A_length, B_length, gid);
+  }
+}
+
 kernel void dot(
   device const void* A,
   device const void* B,
@@ -294,6 +319,7 @@ inline metal::metal(managed_ptr<MTL::Device> device) : device_(device) {
   pso_sub_ = create_compute_pipeline_state_object_(device, lib, "sub");
   pso_mul_ = create_compute_pipeline_state_object_(device, lib, "mul");
   pso_div_ = create_compute_pipeline_state_object_(device, lib, "div");
+  pso_pow_ = create_compute_pipeline_state_object_(device, lib, "pow");
   pso_dot_ = create_compute_pipeline_state_object_(device, lib, "dot");
 
   // Create a command queue
@@ -329,13 +355,17 @@ inline void metal::div(const storage& A, const storage& B, storage& OUT) {
 }
 
 template <value_type T>
+inline void metal::pow(const storage& A, const storage& B, storage& OUT) {
+  arithmetic_operation_<T>(A, B, OUT, pso_pow_);
+}
+
+template <value_type T>
 inline void metal::dot(const storage& A, const storage& B, storage& OUT,
                        uint32_t A_cols, uint32_t OUT_rows, uint32_t OUT_cols) {
   auto pso = pso_dot_;
   auto dtype = std::is_same_v<T, float>
                    ? static_cast<uint32_t>(DataType::Float)
                    : static_cast<uint32_t>(DataType::Integer);
-
   auto commandBuffer = queue_->commandBuffer();
   auto computeEncoder = commandBuffer->computeCommandEncoder();
 
