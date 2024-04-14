@@ -143,7 +143,7 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  array sigmoid() const;
+  array<float> sigmoid() const;
 
   //----------------------------------------------------------------------------
 
@@ -1072,7 +1072,7 @@ inline array<T> array<T>::dot(const array &rhs) const {
 //----------------------------------------------------------------------------
 
 template <value_type T>
-inline array<T> array<T>::sigmoid() const {
+inline array<float> array<T>::sigmoid() const {
   auto tmp = array<float>(shape_, 0.0);
   for (size_t i = 0; i < element_count(); i++) {
     tmp.at(i) = 1.0 / (1.0 + std::exp(-static_cast<float>(at(i))));
@@ -1518,7 +1518,7 @@ inline array<T> array<T>::cpu_dot_operation_(const array &lhs,
 
   for (size_t row = 0; row < rows; row++) {
     for (size_t col = 0; col < cols; col++) {
-      T val = 0;
+      T val{};
       for (size_t i = 0; i < m; i++) {
         val += lhs.at(row, i) * rhs.at(i, col);
       }
