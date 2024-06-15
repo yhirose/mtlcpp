@@ -5,7 +5,7 @@ CXXFLAGS = -std=c++20 -O2 -I$(METAL_CPP_DIR) -I../include -framework Foundation 
 
 INC = ../include/metal.h ../include/array.h ../include/mtlcpp.h
 
-TEST_SRC = test_array.cpp test_examples.cpp test_perceptron.cpp test.cpp
+TEST_SRC = test_array.cpp test_examples.cpp test_perceptron.cpp test_2lnn.cpp test.cpp
 BENCH_SRC = bench.cpp
 MNIST_SRC = mnist.cpp
 

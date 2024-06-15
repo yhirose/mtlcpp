@@ -42,6 +42,11 @@ class array {
   //----------------------------------------------------------------------------
 
   array<bool> operator==(const array &rhs) const;
+  array<bool> operator!=(const array &rhs) const;
+  array<bool> operator>(const array &rhs) const;
+  array<bool> operator<(const array &rhs) const;
+  array<bool> operator>=(const array &rhs) const;
+  array<bool> operator<=(const array &rhs) const;
 
   //----------------------------------------------------------------------------
 
@@ -62,6 +67,7 @@ class array {
 
   void reshape(const shape_type &shape);
 
+  // TODO: can return a reference for performance?
   const auto broadcast(const shape_type &target_shape) const;
 
   array transpose() const;
@@ -139,9 +145,17 @@ class array {
 
   array pow(const array &rhs) const;
 
+  void operator+=(const array &rhs);
+  void operator-=(const array &rhs);
+  void operator*=(const array &rhs);
+  void operator/=(const array &rhs);
+
   //----------------------------------------------------------------------------
 
   array dot(const array &rhs) const;
+
+  array linear(const array& W, const array& b) const;
+
 
   //----------------------------------------------------------------------------
 
@@ -166,6 +180,8 @@ class array {
 
   array<float> softmax() const;
   auto argmax() const;
+
+  float mean_square_error(const array &rhs) const;
 
   //----------------------------------------------------------------------------
 
@@ -206,6 +222,11 @@ class array {
   //----------------------------------------------------------------------------
 
   static auto broadcast_(const array &lhs, const array &rhs, auto cb);
+
+  template <value_type U = T>
+  array<U> apply_binary_operation_(const array &rhs, auto ope) const;
+
+  //----------------------------------------------------------------------------
 
   enum class ArithmeticOperation {
     Add = 0,
@@ -249,6 +270,11 @@ array<T> operator*(auto lhs, const array<T> &rhs);
 
 template <value_type T>
 array<T> operator/(auto lhs, const array<T> &rhs);
+
+//----------------------------------------------------------------------------
+
+template <value_type T, value_type U>
+array<T> where(const array<U> &cond, T x, T y);
 
 //----------------------------------------------------------------------------
 
@@ -398,11 +424,38 @@ inline array<U> array<T>::clone() const {
 
 template <value_type T>
 inline array<bool> array<T>::operator==(const array &rhs) const {
-  auto tmp = array<bool>(shape_, false);
-  for (size_t i = 0; i < element_count(); i++) {
-    tmp.at(i) = at(i) == rhs.at(i);
-  }
-  return tmp;
+  return apply_binary_operation_<bool>(
+      rhs, [](auto lhs, auto rhs) { return lhs == rhs; });
+}
+
+template <value_type T>
+inline array<bool> array<T>::operator!=(const array &rhs) const {
+  return apply_binary_operation_<bool>(
+      rhs, [](auto lhs, auto rhs) { return lhs != rhs; });
+}
+
+template <value_type T>
+inline array<bool> array<T>::operator>(const array &rhs) const {
+  return apply_binary_operation_<bool>(
+      rhs, [](auto lhs, auto rhs) { return lhs > rhs; });
+}
+
+template <value_type T>
+inline array<bool> array<T>::operator>=(const array &rhs) const {
+  return apply_binary_operation_<bool>(
+      rhs, [](auto lhs, auto rhs) { return lhs >= rhs; });
+}
+
+template <value_type T>
+inline array<bool> array<T>::operator<(const array &rhs) const {
+  return apply_binary_operation_<bool>(
+      rhs, [](auto lhs, auto rhs) { return lhs < rhs; });
+}
+
+template <value_type T>
+inline array<bool> array<T>::operator<=(const array &rhs) const {
+  return apply_binary_operation_<bool>(
+      rhs, [](auto lhs, auto rhs) { return lhs <= rhs; });
 }
 
 //----------------------------------------------------------------------------
@@ -1004,6 +1057,7 @@ inline auto array<T>::rows() const {
 
 template <value_type T>
 inline void array<T>::set(std::input_iterator auto it) {
+  // TODO: parallel operation on GPU
   for (size_t i = 0; i < element_count(); i++) {
     at(i) = *it++;
   }
@@ -1065,6 +1119,30 @@ inline array<T> array<T>::pow(const array &rhs) const {
   return arithmetic_operation_(*this, rhs, ArithmeticOperation::Pow);
 }
 
+template <value_type T>
+inline void array<T>::operator+=(const array &rhs) {
+  // TODO: in-place
+  *this = arithmetic_operation_(*this, rhs, ArithmeticOperation::Add);
+}
+
+template <value_type T>
+inline void array<T>::operator-=(const array &rhs) {
+  // TODO: in-place
+  *this = arithmetic_operation_(*this, rhs, ArithmeticOperation::Sub);
+}
+
+template <value_type T>
+inline void array<T>::operator*=(const array &rhs) {
+  // TODO: in-place
+  *this = arithmetic_operation_(*this, rhs, ArithmeticOperation::Mul);
+}
+
+template <value_type T>
+inline void array<T>::operator/=(const array &rhs) {
+  // TODO: in-place
+  *this = arithmetic_operation_(*this, rhs, ArithmeticOperation::Div);
+}
+
 //----------------------------------------------------------------------------
 
 template <value_type T>
@@ -1077,10 +1155,16 @@ inline array<T> array<T>::dot(const array &rhs) const {
   }
 }
 
+template <value_type T>
+inline array<T> array<T>::linear(const array& W, const array& b) const {
+  return dot(W) + b;
+}
+
 //----------------------------------------------------------------------------
 
 template <value_type T>
 inline array<float> array<T>::sigmoid() const {
+  // TODO: parallel operation on GPU
   auto tmp = array<float>(shape_, 0.0);
   for (size_t i = 0; i < element_count(); i++) {
     tmp.at(i) = 1.0 / (1.0 + std::exp(-static_cast<float>(at(i))));
@@ -1242,6 +1326,11 @@ inline auto array<T>::argmax() const {
   }
 
   throw std::runtime_error("array: argmax is available for 2 dimension array.");
+}
+
+template <value_type T>
+inline float array<T>::mean_square_error(const array &rhs) const {
+  return (*this - rhs).pow(2).mean();
 }
 
 //----------------------------------------------------------------------------
@@ -1444,6 +1533,22 @@ inline auto array<T>::broadcast_(const array &lhs, const array &rhs, auto cb) {
 }
 
 template <value_type T>
+template <value_type U>
+inline array<U> array<T>::apply_binary_operation_(const array &rhs,
+                                                  auto ope) const {
+  return broadcast_(*this, rhs, [ope](const auto &lhs, const auto &rhs) {
+    // TODO: parallel operation on GPU
+    auto tmp = array<U>(lhs.shape(), U{});
+    for (size_t i = 0; i < lhs.element_count(); i++) {
+      tmp.at(i) = ope(lhs.at(i), rhs.at(i));
+    }
+    return tmp;
+  });
+}
+
+//----------------------------------------------------------------------------
+
+template <value_type T>
 inline auto array<T>::gpu_arithmetic_operation_(const array &lhs,
                                                 const array &rhs,
                                                 ArithmeticOperation ope) {
@@ -1482,31 +1587,31 @@ template <value_type T>
 inline auto array<T>::cpu_arithmetic_operation_(const array &lhs,
                                                 const array &rhs,
                                                 ArithmeticOperation ope) {
-  return broadcast_(lhs, rhs, [ope](const auto &lhs, const auto &rhs) {
-    return [ope](auto cb) {
-      switch (ope) {
-        case ArithmeticOperation::Add:
-          return cb([](T lhs, T rhs) { return lhs + rhs; });
-        case ArithmeticOperation::Sub:
-          return cb([](T lhs, T rhs) { return lhs - rhs; });
-        case ArithmeticOperation::Mul:
-          return cb([](T lhs, T rhs) { return lhs * rhs; });
-        case ArithmeticOperation::Div:
-          return cb([](T lhs, T rhs) { return lhs / rhs; });
-        case ArithmeticOperation::Pow:
-          return cb([](T lhs, T rhs) { return std::pow(lhs, rhs); });
-        default:
-          assert(false);
-          break;
-      }
-    }([&](auto fn) {
-      auto tmp = array(lhs.shape(), T{});
-      for (size_t i = 0; i < lhs.element_count(); i++) {
-        tmp.at(i) = fn(lhs.at(i), rhs.at(i));
-      }
-      return tmp;
-    });
-  });
+  switch (ope) {
+    case ArithmeticOperation::Add:
+      return lhs.apply_binary_operation_(
+          rhs, [](auto lhs, auto rhs) { return lhs + rhs; });
+      break;
+    case ArithmeticOperation::Sub:
+      return lhs.apply_binary_operation_(
+          rhs, [](auto lhs, auto rhs) { return lhs - rhs; });
+      break;
+    case ArithmeticOperation::Mul:
+      return lhs.apply_binary_operation_(
+          rhs, [](auto lhs, auto rhs) { return lhs * rhs; });
+      break;
+    case ArithmeticOperation::Div:
+      return lhs.apply_binary_operation_(
+          rhs, [](auto lhs, auto rhs) { return lhs / rhs; });
+      break;
+    case ArithmeticOperation::Pow:
+      return lhs.apply_binary_operation_(
+          rhs, [](auto lhs, auto rhs) { return std::pow(lhs, rhs); });
+      break;
+    default:
+      assert(false);
+      break;
+  }
 }
 
 template <value_type T>
@@ -1621,6 +1726,18 @@ inline array<T> operator*(auto lhs, const array<T> &rhs) {
 template <value_type T>
 inline array<T> operator/(auto lhs, const array<T> &rhs) {
   return array<T>(static_cast<T>(lhs)) / rhs;
+}
+
+//----------------------------------------------------------------------------
+
+template <value_type T, value_type U>
+inline array<T> where(const array<U> &cond, T x, T y) {
+  // TODO: parallel operation on GPU
+  auto tmp = array<T>(cond.shape(), T{});
+  for (size_t i = 0; i < cond.element_count(); i++) {
+    tmp.at(i) = cond.at(i) ? x : y;
+  }
+  return tmp;
 }
 
 //----------------------------------------------------------------------------
