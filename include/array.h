@@ -154,8 +154,7 @@ class array {
 
   array dot(const array &rhs) const;
 
-  array linear(const array& W, const array& b) const;
-
+  array linear(const array &W, const array &b) const;
 
   //----------------------------------------------------------------------------
 
@@ -182,6 +181,9 @@ class array {
   auto argmax() const;
 
   float mean_square_error(const array &rhs) const;
+
+  template <value_type U = T>
+  array<U> one_hot(size_t class_count) const;
 
   //----------------------------------------------------------------------------
 
@@ -1156,7 +1158,7 @@ inline array<T> array<T>::dot(const array &rhs) const {
 }
 
 template <value_type T>
-inline array<T> array<T>::linear(const array& W, const array& b) const {
+inline array<T> array<T>::linear(const array &W, const array &b) const {
   return dot(W) + b;
 }
 
@@ -1331,6 +1333,21 @@ inline auto array<T>::argmax() const {
 template <value_type T>
 inline float array<T>::mean_square_error(const array &rhs) const {
   return (*this - rhs).pow(2).mean();
+}
+
+template <value_type T>
+template <value_type U>
+inline array<U> array<T>::one_hot(size_t class_count) const {
+  if (dimension() == 1) {
+    auto tmp = array<U>({shape_[0], class_count}, U{});
+    for (size_t i = 0; i < element_count(); i++) {
+      tmp.at(i, at(i)) = 1;
+    }
+    return tmp;
+  }
+
+  throw std::runtime_error(
+      "array: one_hot is available only for 1 dimension array.");
 }
 
 //----------------------------------------------------------------------------

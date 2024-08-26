@@ -465,3 +465,15 @@ TEST_CASE("array: iterators") {
     }
   }
 }
+
+TEST_CASE("array: one hot") {
+  auto v = array<float>{0, 1, 5, 9};
+
+  CHECK(array_equal(v.one_hot(10), {
+                                       {1, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+                                       {0, 1, 0, 0, 0, 0, 0, 0, 0, 0},
+                                       {0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+                                       {0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+                                   }));
+}
+
