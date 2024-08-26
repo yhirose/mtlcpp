@@ -89,8 +89,6 @@ mtl::array<float> predict(TwoLayerNeuralNetwork& model,
 
 void train(TwoLayerNeuralNetwork& model, const mtl::array<float>& X,
            const mtl::array<float>& Y, size_t epochs, float learning_rate) {
-  std::vector<float> losses;
-
   for (size_t epoch = 0; epoch < epochs; epoch++) {
     // Save variables for back propagation
     auto out = model.forward(X);
@@ -104,8 +102,6 @@ void train(TwoLayerNeuralNetwork& model, const mtl::array<float>& X,
     model.b1 -= db1 * learning_rate;
     model.W2 -= dW2 * learning_rate;
     model.b2 -= db2 * learning_rate;
-
-    losses.push_back(loss);
 
     // Show progress message
     if (epoch % (epochs / 10) == 0) {
