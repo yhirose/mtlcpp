@@ -11,6 +11,7 @@ Build and run unit tests and benchmark
 --------------------------------------
 
  * Install Xcode Command Line Tools
+ * Install Eigen with `brew install eigen` (you will need Homebrew)
  * Run the following commands in Terminal
 
 ```bash

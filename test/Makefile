@@ -1,7 +1,8 @@
 METAL_CPP_DIR = ../metal-cpp_macOS14.2_iOS17.2
+HOMEBREW_INC = /opt/homebrew/include
 
 CXX = clang++
-CXXFLAGS = -std=c++20 -O2 -I$(METAL_CPP_DIR) -I../include -framework Foundation -framework Metal -framework MetalKit
+CXXFLAGS = -std=c++20 -O2 -I$(METAL_CPP_DIR) -I$(HOMEBREW_INC) -I../include -framework Foundation -framework Metal -framework MetalKit
 
 INC = ../include/metal.h ../include/array.h ../include/mtlcpp.h
 
