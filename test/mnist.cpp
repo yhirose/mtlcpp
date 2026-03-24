@@ -4,9 +4,10 @@
 #include <mtlcpp.h>
 #include <sys/stat.h>
 
-#include <fstream>
+#include <algorithm>
 #include <iostream>
-#include <map>
+#include <numeric>
+#include <random>
 
 class memory_mapped_file {
  public:
@@ -67,17 +68,6 @@ class mnist_data {
   size_t label(size_t i) const { return labels_[i]; }
 
   // Image
-  const float* normalized_image_data() const {
-    if (normalized_pixels_.empty()) {
-      auto total_pixels = image_pixel_size() * size();
-      normalized_pixels_.resize(total_pixels);
-      for (size_t i = 0; i < total_pixels; i++) {
-        normalized_pixels_[i] = (float)pixels_[i] / (float)255;
-      }
-    }
-    return normalized_pixels_.data();
-  }
-
   size_t image_rows() const { return number_of_rows_; }
 
   size_t image_columns() const { return number_of_columns_; }
@@ -88,6 +78,29 @@ class mnist_data {
 
   uint8_t pixel(size_t row, size_t col) const {
     return pixels_[number_of_columns_ * row + col];
+  }
+
+  // Normalized data
+  const float* normalized_label_data() const {
+    if (normalized_labels_.empty()) {
+      auto total = size();
+      normalized_labels_.resize(total);
+      for (size_t i = 0; i < total; i++) {
+        normalized_labels_[i] = (float)labels_[i];
+      }
+    }
+    return normalized_labels_.data();
+  }
+
+  const float* normalized_image_data() const {
+    if (normalized_pixels_.empty()) {
+      auto total = image_pixel_size() * size();
+      normalized_pixels_.resize(total);
+      for (size_t i = 0; i < total; i++) {
+        normalized_pixels_[i] = (float)pixels_[i] / (float)255;
+      }
+    }
+    return normalized_pixels_.data();
   }
 
  private:
@@ -107,79 +120,144 @@ class mnist_data {
   memory_mapped_file image_data_;
 
   mutable std::vector<float> normalized_pixels_;
+  mutable std::vector<float> normalized_labels_;
 };
 
-struct Network {
-  std::map<std::string, mtl::array<float>> w;
-  std::map<std::string, mtl::array<float>> b;
-};
-
-Network init_network() {
-  auto split = [](const char* b, const char* e, char d,
-                  std::function<void(const char*, const char*)> fn) {
-    size_t i = 0;
-    size_t beg = 0;
-    while (e ? (b + i < e) : (b[i] != '\0')) {
-      if (b[i] == d) {
-        fn(&b[beg], &b[i]);
-        beg = i + 1;
-      }
-      i++;
-    }
-    if (i) {
-      fn(&b[beg], &b[i]);
-    }
-  };
-
-  Network network;
-  std::ifstream f("sample_weight.csv");
-  std::string line;
-  while (std::getline(f, line)) {
-    std::replace(line.begin(), line.end(), ',', ' ');
-    std::istringstream s(line);
-
-    std::string label;
-    size_t rows;
-    size_t cols;
-    s >> label >> rows >> cols;
-
-    std::vector<float> values;
-    {
-      values.reserve(rows * cols);
-
-      auto count = rows;
-      while (count > 0) {
-        std::getline(f, line);
-        split(&line[0], &line[line.size() - 1], ',',
-              [&](auto b, auto /*e*/) { values.push_back(std::atof(b)); });
-        count--;
-      }
-    }
-
-    if (rows > 1) {
-      network.w[label] = mtl::array<float>({rows, cols}, values);
-    } else {
-      network.b[label] = mtl::array<float>({cols}, values);
-    }
-  }
-  return network;
+mtl::array<float> mean_square_error_derivative(float dout,
+                                               const mtl::array<float>& out,
+                                               const mtl::array<float>& Y) {
+  return dout * (2 * (out - Y)) / Y.length();
 }
 
-auto predict(const Network& network, const mtl::array<float>& x) {
-  auto W1 = network.w.at("W1");
-  auto W2 = network.w.at("W2");
-  auto W3 = network.w.at("W3");
-  auto b1 = network.b.at("b1");
-  auto b2 = network.b.at("b2");
-  auto b3 = network.b.at("b3");
+mtl::array<float> sigmoid_derivative(const mtl::array<float>& dout,
+                                     const mtl::array<float>& x) {
+  auto y = x.sigmoid();
+  return dout * (y * (1 - y));
+}
 
-  auto a1 = x.dot(W1) + b1;
-  auto z1 = a1.sigmoid();
-  auto a2 = z1.dot(W2) + b2;
-  auto z2 = a2.sigmoid();
-  auto a3 = z2.dot(W3) + b3;
-  auto y = a3.softmax();
-  return y;
+std::tuple<mtl::array<float>, mtl::array<float>, mtl::array<float>>
+linear_derivative(const mtl::array<float>& dout, const mtl::array<float>& x,
+                  const mtl::array<float>& W) {
+  auto dx = dout.dot(W.transpose());
+  auto dW = x.transpose().dot(dout);
+  auto db = dout.sum(0);
+  return {dx, dW, db};
+}
+
+struct MnistNetwork {
+  mtl::array<float> W1;
+  mtl::array<float> b1;
+  mtl::array<float> W2;
+  mtl::array<float> b2;
+
+  mtl::array<float> x_;
+  mtl::array<float> net1;
+  mtl::array<float> out1;
+  mtl::array<float> net2;
+  mtl::array<float> out2;
+
+  mtl::array<float> Y;
+
+  MnistNetwork() {
+    // Xavier initialization to prevent sigmoid saturation
+    W1 = (mtl::random({784, 50}) * 2.0 - 1.0) * (1.0 / sqrt(784.0));
+    b1 = mtl::zeros<float>({50});
+    W2 = (mtl::random({50, 10}) * 2.0 - 1.0) * (1.0 / sqrt(50.0));
+    b2 = mtl::zeros<float>({10});
+  }
+
+  mtl::array<float> forward(const mtl::array<float>& x) {
+    auto n1 = x.linear(W1, b1);
+    auto o1 = n1.sigmoid();
+    auto n2 = o1.linear(W2, b2);
+    auto o2 = n2.sigmoid();
+
+    this->x_ = x;
+    this->net1 = std::move(n1);
+    this->out1 = std::move(o1);
+    this->net2 = std::move(n2);
+    this->out2 = std::move(o2);
+
+    return this->out2;
+  }
+
+  float loss(const mtl::array<float>& out, const mtl::array<float>& Y) {
+    this->Y = Y;
+    return out.mean_square_error(Y);
+  }
+
+  std::tuple<mtl::array<float>, mtl::array<float>, mtl::array<float>,
+             mtl::array<float>>
+  backward() {
+    auto dout = mean_square_error_derivative(1.0, this->out2, this->Y);
+
+    dout = sigmoid_derivative(dout, this->net2);
+
+    const auto& [dout1, dW2, db2] =
+        linear_derivative(dout, this->out1, this->W2);
+
+    dout = sigmoid_derivative(dout1, this->net1);
+
+    const auto& [dx, dW1, db1] = linear_derivative(dout, this->x_, this->W1);
+
+    return {dW1, db1, dW2, db2};
+  }
+};
+
+mtl::array<float> predict(MnistNetwork& model, const mtl::array<float>& x) {
+  return model.forward(x).softmax();
+}
+
+void train(MnistNetwork& model, const mnist_data& data, size_t epochs,
+           float learning_rate) {
+  size_t batch_size = 100;
+  size_t data_size = data.size();
+  size_t pixel_size = data.image_pixel_size();
+  auto image_data = data.normalized_image_data();
+  auto label_data = data.normalized_label_data();
+
+  std::mt19937 rng(42);
+  std::vector<size_t> indices(data_size);
+  std::iota(indices.begin(), indices.end(), 0);
+
+  std::vector<float> batch_images(batch_size * pixel_size);
+  std::vector<float> batch_labels(batch_size);
+
+  for (size_t epoch = 0; epoch < epochs; epoch++) {
+    std::shuffle(indices.begin(), indices.end(), rng);
+    float total_loss = 0;
+    size_t batch_count = 0;
+
+    for (size_t i = 0; i + batch_size <= data_size; i += batch_size) {
+      for (size_t j = 0; j < batch_size; j++) {
+        size_t idx = indices[i + j];
+        std::copy(image_data + idx * pixel_size,
+                  image_data + (idx + 1) * pixel_size,
+                  batch_images.data() + j * pixel_size);
+        batch_labels[j] = label_data[idx];
+      }
+
+      auto batch_X =
+          mtl::array<float>({batch_size, pixel_size}, batch_images.data());
+      auto batch_Y =
+          mtl::array<float>({batch_size}, batch_labels.data()).one_hot(10);
+
+      auto out = model.forward(batch_X);
+      auto loss = model.loss(out, batch_Y);
+
+      const auto& [dW1, db1, dW2, db2] = model.backward();
+
+      model.W1 -= dW1 * learning_rate;
+      model.b1 -= db1 * learning_rate;
+      model.W2 -= dW2 * learning_rate;
+      model.b2 -= db2 * learning_rate;
+
+      total_loss += loss;
+      batch_count++;
+    }
+
+    printf("Epoch: %zu, Avg Loss: %f\n", epoch, total_loss / batch_count);
+  }
 }
 
 int main(int argc, const char** argv) {
@@ -190,27 +268,35 @@ int main(int argc, const char** argv) {
       }
     }
 
-    auto data = mnist_data("t10k-labels-idx1-ubyte", "t10k-images-idx3-ubyte");
-    auto network = init_network();
+    // Training
+    auto train_data =
+        mnist_data("train-labels-idx1-ubyte", "train-images-idx3-ubyte");
 
-    auto p = data.normalized_image_data();
+    MnistNetwork m;
 
+    train(m, train_data, 50, 0.1);
+
+    // Evaluation on test data
+    auto test_data =
+        mnist_data("t10k-labels-idx1-ubyte", "t10k-images-idx3-ubyte");
+
+    auto p = test_data.normalized_image_data();
     size_t batch_size = 100;
     size_t accuracy_cnt = 0;
 
-    for (auto i = 0u; i < data.size(); i += batch_size) {
-      auto x = mtl::array<float>({batch_size, data.image_pixel_size()},
-                                 p + data.image_pixel_size() * i);
-      auto y = predict(network, x);
-      auto e = mtl::array<int>({batch_size}, data.label_data() + i);
+    for (size_t i = 0; i < test_data.size(); i += batch_size) {
+      auto x = mtl::array<float>({batch_size, test_data.image_pixel_size()},
+                                 p + test_data.image_pixel_size() * i);
+      auto y = predict(m, x);
+      auto e = mtl::array<int>({batch_size}, test_data.label_data() + i);
       auto a = y.argmax();
 
       auto r = e == a;
       accuracy_cnt += r.count();
     }
 
-    auto accuracy = (double)accuracy_cnt / (double)data.size();
-    std::cout << "MNIST Accuracy: " << accuracy << std::endl;
+    auto accuracy = (double)accuracy_cnt / (double)test_data.size();
+    std::cout << "MNIST Test Accuracy: " << accuracy << std::endl;
   } catch (const std::runtime_error& e) {
     std::cerr << e.what() << std::endl;
   }

@@ -3,15 +3,15 @@ mtlcpp
 
 A header-only C++20 linear algebra library for Metal on MacOS
 
- * This project is still in development and is far from reaching the first alpha version :)
- * Data types supported in this library are `int` and `float` only, since Metal doesn't support `double`
- * This library uses GPU cores in Apple M1 chip with [Metal-cpp](https://developer.apple.com/metal/cpp/)
+* This project is still in development and is far from reaching the first alpha version :)
+* Data types supported in this library are `int` and `float` only, since Metal doesn't support `double`
+* This library uses GPU cores in Apple M1 chip with [Metal-cpp](https://developer.apple.com/metal/cpp/)
 
 Build and run unit tests and benchmark
 --------------------------------------
 
- * Install Xcode Command Line Tools
- * Run the following commands in Terminal
+* Install Xcode Command Line Tools
+* Run the following commands in Terminal
 
 ```bash
 cd test
@@ -87,35 +87,35 @@ Operations
 
 ### GPU and CPU
 
- * `+` (add)
- * `-` (sub)
- * `*` (mul)
- * `/` (div)
- * `dot` (dot product)
+* `+` (add)
+* `-` (sub)
+* `*` (mul)
+* `/` (div)
+* `dot` (dot product)
 
 ### CPU only
 
- * `==`
- * `clone`
- * `constants`
- * `empty`
- * `zeros`
- * `ones`
- * `random`
- * `transpose`
- * `sigmoid`
- * `sum`
- * `mean`
- * `min`
- * `max`
- * `count`
- * `all`
- * `softmax`
- * `argmax`
- * `array_equal`
- * `allclose`
+* `==`
+* `clone`
+* `constants`
+* `empty`
+* `zeros`
+* `ones`
+* `random`
+* `transpose`
+* `sigmoid`
+* `sum`
+* `mean`
+* `min`
+* `max`
+* `count`
+* `all`
+* `softmax`
+* `argmax`
+* `array_equal`
+* `allclose`
 
 License
 -------
 
-MIT license (© 2024 Yuji Hirose)
+MIT license (© 2026 Yuji Hirose)
