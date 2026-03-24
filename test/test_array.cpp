@@ -189,7 +189,7 @@ TEST_CASE("array: matrix ranges") {
   size_t i = 0;
   for (size_t row = 0; row < m.shape()[0]; row++) {
     for (size_t col = 0; col < m.shape()[1]; col++) {
-      CHECK(m.at(row, col) == m.at(i));
+      CHECK(m[row, col] == m.at(i));
       i++;
     }
   }
@@ -312,9 +312,9 @@ TEST_CASE("array: matrix broadcast") {
   CHECK(b.at(0) == 1);
   CHECK(b.at(b.element_count() - 1) == 6);
 
-  CHECK(b.at(0, 0, 0) == 1);
-  CHECK(b.at(1, 1, 0) == 4);
-  CHECK(b.at(2, 1, 2) == 6);
+  CHECK(b[0, 0, 0] == 1);
+  CHECK(b[1, 1, 0] == 4);
+  CHECK(b[2, 1, 2] == 6);
 
   CHECK(b.strides().size() == 3);
   CHECK(b.strides()[0] == 0);

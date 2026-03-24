@@ -2,6 +2,7 @@
 
 #include <metal.h>
 
+#include <algorithm>
 #include <concepts>
 #include <iostream>
 #include <iterator>
@@ -80,11 +81,11 @@ class array {
   T at(size_t i) const;
   T &at(size_t i);
 
-  T at(size_t x, size_t y) const;
-  T &at(size_t x, size_t y);
+  T operator[](size_t x, size_t y) const;
+  T &operator[](size_t x, size_t y);
 
-  T at(size_t x, size_t y, size_t z) const;
-  T &at(size_t x, size_t y, size_t z);
+  T operator[](size_t x, size_t y, size_t z) const;
+  T &operator[](size_t x, size_t y, size_t z);
 
   T at(const std::vector<size_t> &position) const;
   T &at(const std::vector<size_t> &position);
@@ -571,7 +572,7 @@ inline array<T> array<T>::transpose() const {
 
     auto it = element_cbegin();
     for (size_t col = 0; col < element_count(); col++) {
-      tmp.at(0, col) = *it;
+      tmp[0, col] = *it;
       ++it;
     }
     return tmp;
@@ -598,7 +599,7 @@ inline array<T> array<T>::transpose() const {
       auto it = element_cbegin();
       for (size_t col = 0; col < shape[1]; col++) {
         for (size_t row = 0; row < shape[0]; row++) {
-          tmp.at(row, col) = *it;
+          tmp[row, col] = *it;
           ++it;
         }
       }
@@ -617,7 +618,7 @@ inline array<T> array<T>::transpose() const {
     for (size_t z = 0; z < shape[2]; z++) {
       for (size_t y = 0; y < shape[1]; y++) {
         for (size_t x = 0; x < shape[0]; x++) {
-          tmp.at(x, y, z) = *it;
+          tmp[x, y, z] = *it;
           ++it;
         }
       }
@@ -653,25 +654,25 @@ inline T &array<T>::at(size_t i) {
 }
 
 template <value_type T>
-inline T array<T>::at(size_t x, size_t y) const {
+inline T array<T>::operator[](size_t x, size_t y) const {
   bounds_check_(x, y);
   return buffer_data()[strides_[0] * x + y];
 }
 
 template <value_type T>
-inline T &array<T>::at(size_t x, size_t y) {
+inline T &array<T>::operator[](size_t x, size_t y) {
   bounds_check_(x, y);
   return buffer_data()[strides_[0] * x + y];
 }
 
 template <value_type T>
-inline T array<T>::at(size_t x, size_t y, size_t z) const {
+inline T array<T>::operator[](size_t x, size_t y, size_t z) const {
   bounds_check_(x, y, z);
   return buffer_data()[(strides_[0] * x) + (strides_[1] * y) + z];
 }
 
 template <value_type T>
-inline T &array<T>::at(size_t x, size_t y, size_t z) {
+inline T &array<T>::operator[](size_t x, size_t y, size_t z) {
   bounds_check_(x, y, z);
   return buffer_data()[(strides_[0] * x) + (strides_[1] * y) + z];
 }
@@ -1341,7 +1342,7 @@ inline array<U> array<T>::one_hot(size_t class_count) const {
   if (dimension() == 1) {
     auto tmp = array<U>({shape_[0], class_count}, U{});
     for (size_t i = 0; i < element_count(); i++) {
-      tmp.at(i, at(i)) = 1;
+      tmp[i, at(i)] = 1;
     }
     return tmp;
   }
@@ -1656,9 +1657,9 @@ inline array<T> array<T>::cpu_dot_operation_(const array &lhs,
     for (size_t col = 0; col < cols; col++) {
       T val{};
       for (size_t i = 0; i < m; i++) {
-        val += lhs.at(row, i) * rhs.at(i, col);
+        val += lhs[row, i] * rhs[i, col];
       }
-      tmp.at(row, col) = val;
+      tmp[row, col] = val;
     }
   }
   return tmp;
