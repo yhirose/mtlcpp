@@ -4,10 +4,12 @@
 
 #include <algorithm>
 #include <concepts>
+#include <format>
 #include <iostream>
 #include <iterator>
 #include <limits>
 #include <ranges>
+#include <span>
 
 namespace mtl {
 
@@ -54,8 +56,8 @@ class array {
   size_t buffer_element_count() const;
   size_t buffer_bytes() const;
 
-  T *buffer_data();
-  const T *buffer_data() const;
+  auto *buffer_data(this auto &&self);
+  auto buffer_span(this auto &&self);
 
   //----------------------------------------------------------------------------
 
@@ -75,20 +77,13 @@ class array {
 
   //----------------------------------------------------------------------------
 
-  T at() const;
-  T &at();
+  auto &at(this auto &&self);
+  auto &at(this auto &&self, size_t i);
 
-  T at(size_t i) const;
-  T &at(size_t i);
+  auto &operator[](this auto &&self, size_t x, size_t y);
+  auto &operator[](this auto &&self, size_t x, size_t y, size_t z);
 
-  T operator[](size_t x, size_t y) const;
-  T &operator[](size_t x, size_t y);
-
-  T operator[](size_t x, size_t y, size_t z) const;
-  T &operator[](size_t x, size_t y, size_t z);
-
-  T at(const std::vector<size_t> &position) const;
-  T &at(const std::vector<size_t> &position);
+  auto &at(this auto &&self, const std::vector<size_t> &position);
 
   template <size_t I>
   auto take() const;
@@ -474,13 +469,17 @@ inline size_t array<T>::buffer_bytes() const {
 }
 
 template <value_type T>
-inline T *array<T>::buffer_data() {
-  return static_cast<T *>(storage_.buf->contents()) + storage_.off;
+inline auto *array<T>::buffer_data(this auto &&self) {
+  constexpr bool is_const =
+      std::is_const_v<std::remove_reference_t<decltype(self)>>;
+  using ptr_type = std::conditional_t<is_const, const T *, T *>;
+  return static_cast<ptr_type>(self.storage_.buf->contents()) +
+         self.storage_.off;
 }
 
 template <value_type T>
-inline const T *array<T>::buffer_data() const {
-  return static_cast<const T *>(storage_.buf->contents()) + storage_.off;
+inline auto array<T>::buffer_span(this auto &&self) {
+  return std::span(self.buffer_data(), self.buffer_element_count());
 }
 
 //----------------------------------------------------------------------------
@@ -632,69 +631,38 @@ inline array<T> array<T>::transpose() const {
 //----------------------------------------------------------------------------
 
 template <value_type T>
-inline T array<T>::at() const {
-  return *buffer_data();
+inline auto &array<T>::at(this auto &&self) {
+  return *self.buffer_data();
 }
 
 template <value_type T>
-inline T &array<T>::at() {
-  return *buffer_data();
+inline auto &array<T>::at(this auto &&self, size_t i) {
+  self.bounds_check_(i);
+  return self.buffer_data()[i % self.buffer_element_count()];
 }
 
 template <value_type T>
-inline T array<T>::at(size_t i) const {
-  bounds_check_(i);
-  return buffer_data()[i % buffer_element_count()];
+inline auto &array<T>::operator[](this auto &&self, size_t x, size_t y) {
+  self.bounds_check_(x, y);
+  return self.buffer_data()[self.strides_[0] * x + y];
 }
 
 template <value_type T>
-inline T &array<T>::at(size_t i) {
-  bounds_check_(i);
-  return buffer_data()[i % buffer_element_count()];
+inline auto &
+array<T>::operator[](this auto &&self, size_t x, size_t y, size_t z) {
+  self.bounds_check_(x, y, z);
+  return self.buffer_data()[(self.strides_[0] * x) + (self.strides_[1] * y) +
+                            z];
 }
 
 template <value_type T>
-inline T array<T>::operator[](size_t x, size_t y) const {
-  bounds_check_(x, y);
-  return buffer_data()[strides_[0] * x + y];
-}
-
-template <value_type T>
-inline T &array<T>::operator[](size_t x, size_t y) {
-  bounds_check_(x, y);
-  return buffer_data()[strides_[0] * x + y];
-}
-
-template <value_type T>
-inline T array<T>::operator[](size_t x, size_t y, size_t z) const {
-  bounds_check_(x, y, z);
-  return buffer_data()[(strides_[0] * x) + (strides_[1] * y) + z];
-}
-
-template <value_type T>
-inline T &array<T>::operator[](size_t x, size_t y, size_t z) {
-  bounds_check_(x, y, z);
-  return buffer_data()[(strides_[0] * x) + (strides_[1] * y) + z];
-}
-
-template <value_type T>
-inline T array<T>::at(const std::vector<size_t> &position) const {
-  // TODO: bounds_check_(position);
+inline auto &array<T>::at(this auto &&self,
+                          const std::vector<size_t> &position) {
   size_t buffer_index = 0;
   for (size_t i = 0; i < position.size(); i++) {
-    buffer_index += strides_[i] * position[i];
+    buffer_index += self.strides_[i] * position[i];
   }
-  return buffer_data()[buffer_index];
-}
-
-template <value_type T>
-inline T &array<T>::at(const std::vector<size_t> &position) {
-  // TODO: bounds_check_(position);
-  size_t buffer_index = 0;
-  for (size_t i = 0; i < position.size(); i++) {
-    buffer_index += strides_[i] * position[i];
-  }
-  return buffer_data()[buffer_index];
+  return self.buffer_data()[buffer_index];
 }
 
 template <value_type T>
@@ -752,9 +720,7 @@ class element_iterator {
 
   reference &operator*() { return arr_->at(i_); }
 
-  friend bool operator==(const element_iterator &a, const element_iterator &b) {
-    return a.i_ == b.i_;
-  };
+  bool operator==(const element_iterator &) const = default;
 
  private:
   array<T> *arr_ = nullptr;
@@ -783,10 +749,7 @@ class const_element_iterator {
 
   value_type operator*() const { return arr_->at(i_); }
 
-  friend bool operator==(const const_element_iterator &a,
-                         const const_element_iterator &b) {
-    return a.i_ == b.i_;
-  };
+  bool operator==(const const_element_iterator &) const = default;
 
  private:
   const array<T> *arr_ = nullptr;
@@ -867,9 +830,7 @@ class row_iterator {
 
   value_type operator*() { return (*arr_)[i_]; }
 
-  friend bool operator==(const row_iterator &a, const row_iterator &b) {
-    return a.i_ == b.i_;
-  };
+  bool operator==(const row_iterator &) const = default;
 
  private:
   array<T> *arr_ = nullptr;
@@ -898,10 +859,7 @@ class const_row_iterator {
 
   value_type operator*() const { return (*arr_)[i_]; }
 
-  friend bool operator==(const const_row_iterator &a,
-                         const const_row_iterator &b) {
-    return a.i_ == b.i_;
-  };
+  bool operator==(const const_row_iterator &) const = default;
 
  private:
   const array<T> *arr_ = nullptr;
@@ -930,10 +888,7 @@ class row_tuple_iterator {
 
   auto operator*() const { return (*arr_)[i_].template take<N>(); }
 
-  friend bool operator==(const row_tuple_iterator &a,
-                         const row_tuple_iterator &b) {
-    return a.i_ == b.i_;
-  };
+  bool operator==(const row_tuple_iterator &) const = default;
 
  private:
   array<T> *arr_ = nullptr;
@@ -961,10 +916,7 @@ class const_row_tuple_iterator {
 
   auto operator*() const { return (*arr_)(i_).template take<N>(); }
 
-  friend bool operator==(const const_row_tuple_iterator &a,
-                         const const_row_tuple_iterator &b) {
-    return a.i_ == b.i_;
-  };
+  bool operator==(const const_row_tuple_iterator &) const = default;
 
  private:
   const array<T> *arr_ = nullptr;
@@ -1075,7 +1027,7 @@ inline void array<T>::set(std::initializer_list<T> l) {
 
 template <value_type T>
 inline void array<T>::constants(T val) {
-  std::fill(buffer_data(), buffer_data() + buffer_element_count(), val);
+  std::ranges::fill(buffer_span(), val);
 }
 
 template <value_type T>
@@ -1090,7 +1042,7 @@ inline void array<T>::ones() {
 
 template <value_type T>
 inline void array<T>::random() {
-  std::generate(buffer_data(), buffer_data() + buffer_element_count(), []() {
+  std::ranges::generate(buffer_span(), []() {
     return static_cast<float>(static_cast<double>(rand()) / RAND_MAX);
   });
 }
@@ -1216,58 +1168,28 @@ inline array<float> array<T>::mean(size_t axis) const {
 
 template <value_type T>
 inline T array<T>::min() const {
-  T min_val = std::numeric_limits<T>::max();
-  for (size_t i = 0; i < buffer_element_count(); i++) {
-    auto val = buffer_data()[i];
-    if (val < min_val) {
-      min_val = val;
-    }
-  }
-  return min_val;
+  return *std::ranges::min_element(buffer_span());
 }
 
 template <value_type T>
 inline T array<T>::max() const {
-  T max_val = std::numeric_limits<T>::min();
-  for (size_t i = 0; i < buffer_element_count(); i++) {
-    auto val = buffer_data()[i];
-    if (val > max_val) {
-      max_val = val;
-    }
-  }
-  return max_val;
+  return *std::ranges::max_element(buffer_span());
 }
 
 template <value_type T>
 inline size_t array<T>::count() const {
-  size_t cnt = 0;
-  for (size_t i = 0; i < element_count(); i++) {
-    if (at(i)) {
-      cnt++;
-    }
-  }
-  return cnt;
+  return std::ranges::count_if(buffer_span(), [](T v) { return !!v; });
 }
 
 template <value_type T>
 inline bool array<T>::all(arithmetic auto val) const {
-  for (size_t i = 0; i < buffer_element_count(); i++) {
-    if (buffer_data()[i] != val) {
-      return false;
-    }
-  }
-  return true;
+  return std::ranges::all_of(buffer_span(), [val](T v) { return v == val; });
 }
 
 template <value_type T>
 template <typename U>
 inline bool array<T>::all(U fn) const {
-  for (size_t i = 0; i < buffer_element_count(); i++) {
-    if (!fn(buffer_data()[i])) {
-      return false;
-    }
-  }
-  return true;
+  return std::ranges::all_of(buffer_span(), fn);
 }
 
 template <value_type T>
@@ -1355,16 +1277,13 @@ inline array<U> array<T>::one_hot(size_t class_count) const {
 
 template <value_type T>
 inline std::string array<T>::print_shape_type(const shape_type &shape) const {
-  std::stringstream ss;
-  ss << "{";
+  std::string result = "{";
   for (size_t i = 0; i < shape.size(); i++) {
-    if (i != 0) {
-      ss << ", ";
-    }
-    ss << shape[i];
+    if (i != 0) result += ", ";
+    result += std::format("{}", shape[i]);
   }
-  ss << "}";
-  return ss.str();
+  result += "}";
+  return result;
 }
 
 template <value_type T>
@@ -1388,10 +1307,9 @@ inline std::string array<T>::print_data_type() const {
 
 template <value_type T>
 inline std::string array<T>::print_info() const {
-  std::stringstream ss;
-  ss << "dtype: " << print_data_type() << ", dim: " << dimension()
-     << ", shape: " << print_shape() << ", strides: " << print_strides();
-  return ss.str();
+  return std::format("dtype: {}, dim: {}, shape: {}, strides: {}",
+                     print_data_type(), dimension(), print_shape(),
+                     print_strides());
 }
 
 template <value_type T>
@@ -1762,16 +1680,10 @@ inline array<T> where(const array<U> &cond, T x, T y) {
 
 template <value_type T>
 inline bool array_equal(const array<T> &a, const array<T> &b) {
-  if (&a != &b) {
-    if (a.shape() != b.shape()) {
-      return false;
-    }
-
-    for (size_t i = 0; i < a.element_count(); i++) {
-      if (a.at(i) != b.at(i)) {
-        return false;
-      }
-    }
+  if (&a == &b) return true;
+  if (a.shape() != b.shape()) return false;
+  for (size_t i = 0; i < a.element_count(); i++) {
+    if (a.at(i) != b.at(i)) return false;
   }
   return true;
 }
@@ -1788,21 +1700,15 @@ inline bool is_close(T a, U b) {
 
 template <value_type T>
 inline bool allclose(const array<T> &a, const array<T> &b, float tolerance) {
-  if (&a != &b) {
-    if (a.shape() != b.shape()) {
-      return false;
-    }
-
-    for (size_t i = 0; i < a.element_count(); i++) {
-      if constexpr (std::is_same_v<T, float>) {
-        if (std::abs(a.at(i) - b.at(i)) > tolerance) {
-          return false;
-        }
-      } else {
-        if (a.at(i) != b.at(i)) {
-          return false;
-        }
-      }
+  if (&a == &b) return true;
+  if (a.shape() != b.shape()) return false;
+  auto as = a.buffer_span();
+  auto bs = b.buffer_span();
+  for (size_t i = 0; i < as.size(); i++) {
+    if constexpr (std::is_same_v<T, float>) {
+      if (std::abs(as[i] - bs[i]) > tolerance) return false;
+    } else {
+      if (as[i] != bs[i]) return false;
     }
   }
   return true;
