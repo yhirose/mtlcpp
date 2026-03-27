@@ -1,121 +1,120 @@
-mtlcpp
-======
+Silicon Array
+=============
 
-A header-only C++20 linear algebra library for Metal on MacOS
+Numerical Computing Library for Apple Silicon
 
-* This project is still in development and is far from reaching the first alpha version :)
-* Data types supported in this library are `int` and `float` only, since Metal doesn't support `double`
-* This library uses GPU cores in Apple M1 chip with [Metal-cpp](https://developer.apple.com/metal/cpp/)
+* Header-only C++23 library -- just `#include <silarray.h>`
+* Switchable CPU/GPU backend via `sil::use_cpu()` / `sil::use_mps()` (default: GPU)
+* CPU: Accelerate framework (vDSP, CBLAS, NEON)
+* GPU: Metal Shading Language (MSL) for elementwise ops and matrix multiplication (STEEL kernel), Metal Performance Shaders (MPS) as fallback
+* Lazy evaluation with expression templates and affine fusion for chained elementwise operations
+* Data types: `float`, `int`, `bool`
 
-Build and run unit tests and benchmark
---------------------------------------
+Requirements
+------------
 
-* Install Xcode Command Line Tools
-* Run the following commands in Terminal
+* macOS with Apple Silicon
+* Xcode Command Line Tools (clang++ with C++23 support)
+* Frameworks: Metal, Accelerate, MetalPerformanceShaders, Foundation
+
+Example
+-------
+
+```cpp
+#include <silarray.h>
+
+auto a = sil::ones<float>({1000, 1000});
+auto b = sil::ones<float>({1000, 1000});
+
+auto c = a + b;       // runs on GPU (default)
+auto d = a.dot(b);
+
+sil::use_cpu();        // switch to CPU backend
+auto e = a + b;        // runs on CPU
+```
+
+Operations
+----------
+
+### CPU/GPU switchable
+
+| Category | Operations |
+|----------|-----------|
+| Arithmetic | `+` `-` `*` `/` `pow` (elementwise, with broadcasting) |
+| In-place | `+=` `-=` `*=` `/=` |
+| Linear algebra | `dot` (matrix multiplication with STEEL kernel on GPU) |
+| Activations | `sigmoid` `relu` `softmax` `layer_norm` |
+| Fused ops | `linear` (dot + bias), `linear_sigmoid` (dot + bias + sigmoid on GPU) |
+| Reduction | `sum` `sum(axis)` |
+
+### CPU only
+
+| Category | Operations |
+|----------|-----------|
+| Comparison | `==` `!=` `>` `<` `>=` `<=` |
+| Shape | `clone` `transpose` `reshape` `broadcast` |
+| Creation | `empty` `zeros` `ones` `random` `constants` |
+| Reduction | `mean` `mean(axis)` `min` `max` `count` `all` `argmax` |
+| NN utilities | `mean_square_error` `one_hot` `sigmoid_backward` |
+| Selection | `where(condition, x, y)` |
+| Testing | `array_equal` `allclose` |
+
+Build and Run
+-------------
+
+### Unit tests
 
 ```bash
 cd test
 make
 ```
 
-Benchmark as of 3/2/2024 on M1 MacBook Pro 14
----------------------------------------------
+Tests can be run in different device modes:
 
-|               ns/op |                op/s | benchmark
-|--------------------:|--------------------:|:----------
-|      150,856,709.00 |                6.63 | CPU: `a + b`
-|        2,262,442.07 |              442.00 | GPU: `a + b`
-|        1,351,401.59 |              739.97 | Eigen: `a + b`
-|      964,220,500.00 |                1.04 | CPU: `a.dot(b)`
-|        1,094,602.35 |              913.57 | GPU: `a.dot(b)`
-|        3,002,299.36 |              333.08 | Eigen: `a * b`
-
-```cpp
-// test/bench.cpp
-
-// `add` benchmark
-const size_t n = 10'000'000;
-
-auto a = mtl::ones<float>({n});
-auto b = mtl::ones<float>({n});
-auto c = mtl::array<float>();
-
-mtl::use_cpu();
-Bench().run("CPU: a + b", [&] {
-  c = a + b;
-});
-
-mtl::use_gpu();
-Bench().run("GPU: a + b", [&] {
-  c = a + b;
-});
-
-auto aa = Eigen::Vector<float, Eigen::Dynamic>::Ones(n);
-auto bb = Eigen::Vector<float, Eigen::Dynamic>::Ones(n);
-auto cc = Eigen::Vector<float, Eigen::Dynamic>(n);
-
-Bench().run("Eigen: a + b", [&] {
-  cc = aa + bb;
-});
-
-// `dot` benchmark
-auto a = mtl::ones<float>({1000, 1000});
-auto b = mtl::ones<float>({1000, 100});
-auto c = mtl::array<float>();
-
-mtl::use_cpu();
-Bench().run("CPU: a.dot(b)", [&] {
-  c = a.dot(b);
-});
-
-mtl::use_gpu();
-Bench().run("GPU: a.dot(b)", [&] {
-  c = a.dot(b);
-});
-
-auto aa = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>::Ones(1000, 1000);
-auto bb = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>::Ones(1000, 100);
-auto cc = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>();
-
-Bench().run("Eigen: a * b", [&] {
-  cc = aa * bb;
-});
+```bash
+./test          # GPU mode (default)
+./test --gpu    # explicit GPU
+./test --cpu    # CPU mode
 ```
 
-Operations
-----------
+### MNIST
 
-### GPU and CPU
+```bash
+cd test
+make mnist
+./mnist
+```
 
-* `+` (add)
-* `-` (sub)
-* `*` (mul)
-* `/` (div)
-* `dot` (dot product)
+### Benchmarks
 
-### CPU only
+Benchmarks compare against Eigen, MLX, libtorch, and ggml.
 
-* `==`
-* `clone`
-* `constants`
-* `empty`
-* `zeros`
-* `ones`
-* `random`
-* `transpose`
-* `sigmoid`
-* `sum`
-* `mean`
-* `min`
-* `max`
-* `count`
-* `all`
-* `softmax`
-* `argmax`
-* `array_equal`
-* `allclose`
+```bash
+cd bench
+make run            # all benchmarks
+make run-micro      # micro only (single operation)
+make run-composite  # composite only (multi-operation)
+make table          # Markdown table output
+```
+
+See [bench/README.md](bench/README.md) for detailed results and setup instructions.
+
+Architecture
+------------
+
+```
+include/
+  silarray.h          Main header (includes all below)
+  array.h             Core array class with expression templates
+  cpu.h               CPU backend (Accelerate: vDSP, CBLAS, NEON)
+  gpu.h               GPU backend (Metal/MSL, STEEL matmul kernel)
+  device.h            Device selection (CPU/MPS switch)
+  types.h             Type concepts (float, int, bool)
+  objc.h              Objective-C bridge for Metal API
+  unified_memory.h    GPU shared memory management
+```
 
 License
 -------
 
-MIT license (© 2026 Yuji Hirose)
+MIT license (c) 2026 Yuji Hirose
