@@ -1,6 +1,7 @@
 #pragma once
 
-#include <metal.h>
+#include <cpu.h>
+#include <gpu.h>
 
 #include <algorithm>
 #include <concepts>
@@ -8,13 +9,35 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <numeric>
+#include <random>
 #include <ranges>
 #include <span>
+#include <sstream>
 
-namespace mtl {
+namespace sil {
+
+template <typename T>
+concept arithmetic = std::is_arithmetic_v<T>;
 
 using shape_type = std::vector<size_t>;
 using strides_type = shape_type;
+
+//------------------------------------------------------------------------------
+
+template <value_type T, size_t I>
+struct nested_initializer_list_ {
+  using nested_type = nested_initializer_list_<T, I - 1>::type;
+  using type = std::initializer_list<nested_type>;
+};
+
+template <value_type T>
+struct nested_initializer_list_<T, 0> {
+  using type = T;
+};
+
+template <value_type T, size_t I>
+using nested_initializer_list = nested_initializer_list_<T, I>::type;
 
 //------------------------------------------------------------------------------
 
@@ -70,7 +93,6 @@ class array {
 
   void reshape(const shape_type &shape);
 
-  // TODO: can return a reference for performance?
   const auto broadcast(const shape_type &target_shape) const;
 
   array transpose() const;
@@ -193,11 +215,15 @@ class array {
  private:
   shape_type shape_;
   strides_type strides_;
-  metal::storage storage_;
+  storage storage_;
 
   //----------------------------------------------------------------------------
 
   void allocate_buffer_();
+
+  static array make_uninit_(const shape_type &shape);
+
+  array materialize_() const;
 
   //----------------------------------------------------------------------------
 
@@ -234,18 +260,30 @@ class array {
     Pow,
   };
 
-  static auto gpu_arithmetic_operation_(const array &lhs, const array &rhs,
-                                        ArithmeticOperation ope);
+  static void cpu_arithmetic_dispatch_(const storage &lhs, const storage &rhs,
+                                       storage &dst, ArithmeticOperation ope);
+
+  static void msl_arithmetic_dispatch_(const storage &lhs, const storage &rhs,
+                                       storage &dst, ArithmeticOperation ope);
+
   static auto cpu_arithmetic_operation_(const array &lhs, const array &rhs,
+                                        ArithmeticOperation ope);
+
+  static auto msl_arithmetic_operation_(const array &lhs, const array &rhs,
                                         ArithmeticOperation ope);
 
   static auto arithmetic_operation_(const array &lhs, const array &rhs,
                                     ArithmeticOperation ope);
 
+  void arithmetic_inplace_(const array &rhs, ArithmeticOperation ope);
+
+  void cpu_arithmetic_inplace_(const array &rhs, ArithmeticOperation ope);
+
   //----------------------------------------------------------------------------
 
   static array cpu_dot_operation_(const array &lhs, const array &rhs);
-  static array gpu_dot_operation_(const array &lhs, const array &rhs);
+  static array mps_dot_operation_(const array &lhs, const array &rhs);
+  static array auto_dot_operation_(const array &lhs, const array &rhs);
   template <typename U>
   array dot_operation_(const array &rhs, U fn) const;
 };
@@ -473,8 +511,7 @@ inline auto *array<T>::buffer_data(this auto &&self) {
   constexpr bool is_const =
       std::is_const_v<std::remove_reference_t<decltype(self)>>;
   using ptr_type = std::conditional_t<is_const, const T *, T *>;
-  return static_cast<ptr_type>(self.storage_.buf->contents()) +
-         self.storage_.off;
+  return static_cast<ptr_type>(self.storage_.data) + self.storage_.off;
 }
 
 template <value_type T>
@@ -486,7 +523,6 @@ inline auto array<T>::buffer_span(this auto &&self) {
 
 template <value_type T>
 inline size_t array<T>::element_count() const {
-  // TODO: cache
   size_t count = 1;
   for (auto n : shape_) {
     count *= n;
@@ -519,17 +555,13 @@ inline const strides_type &array<T>::strides() const {
 
 template <value_type T>
 inline void array<T>::reshape(const shape_type &shape) {
-  // TODO: check the shape
   shape_ = shape;
 
-  // strides
   strides_.clear();
   strides_.push_back(1);
-  if (!strides_.empty()) {
-    for (int i = shape.size() - 1; i > 0; i--) {
-      auto n = strides_.front() * shape[i];
-      strides_.insert(strides_.begin(), n);
-    }
+  for (int i = shape.size() - 1; i > 0; i--) {
+    auto n = strides_.front() * shape[i];
+    strides_.insert(strides_.begin(), n);
   }
 }
 
@@ -537,27 +569,37 @@ template <value_type T>
 inline const auto array<T>::broadcast(const shape_type &target_shape) const {
   if (target_shape.size() < dimension()) {
     throw std::runtime_error("array: invalid shape for broadcast.");
-  } else if (target_shape.size() == dimension()) {
-    return *this;
   }
 
   auto diff = target_shape.size() - dimension();
   for (size_t i = 0; i < dimension(); i++) {
-    if (shape_[i] != target_shape[i + diff]) {
+    if (shape_[i] != target_shape[i + diff] && shape_[i] != 1) {
       throw std::runtime_error("array: invalid shape for broadcast.");
     }
+  }
+
+  if (target_shape == shape_) {
+    return *this;
   }
 
   array tmp = *this;
   tmp.shape_ = target_shape;
 
-  // strides
-  tmp.strides_.clear();
-  tmp.strides_.push_back(1);
-  if (!strides_.empty()) {
-    for (int i = target_shape.size() - 1; i > 0; i--) {
-      auto n = i <= diff ? 0 : tmp.strides_.front() * target_shape[i];
-      tmp.strides_.insert(tmp.strides_.begin(), n);
+  // Build strides: start from source strides, prepend zeros for new dims,
+  // and zero out dims where source size is 1 (broadcast).
+  tmp.strides_.resize(target_shape.size(), 0);
+  for (size_t i = 0; i < target_shape.size(); i++) {
+    int src_axis = static_cast<int>(i) - static_cast<int>(diff);
+    if (src_axis < 0) {
+      // New dimension added by higher-dim broadcast
+      tmp.strides_[i] = 0;
+    } else if (src_axis < static_cast<int>(dimension()) &&
+               shape_[src_axis] == 1 && target_shape[i] != 1) {
+      // Source dim is 1, broadcast to target size
+      tmp.strides_[i] = 0;
+    } else if (src_axis < static_cast<int>(dimension())) {
+      // Keep original stride
+      tmp.strides_[i] = strides_[src_axis];
     }
   }
   return tmp;
@@ -566,8 +608,7 @@ inline const auto array<T>::broadcast(const shape_type &target_shape) const {
 template <value_type T>
 inline array<T> array<T>::transpose() const {
   if (dimension() == 1) {
-    auto tmp = clone();
-    tmp.reshape({1, element_count()});
+    auto tmp = make_uninit_({1, element_count()});
 
     auto it = element_cbegin();
     for (size_t col = 0; col < element_count(); col++) {
@@ -579,8 +620,7 @@ inline array<T> array<T>::transpose() const {
 
   if (dimension() == 2) {
     if (shape_[0] == 1) {
-      auto tmp = clone();
-      tmp.reshape({element_count()});
+      auto tmp = make_uninit_({element_count()});
 
       auto it = element_cbegin();
       for (size_t row = 0; row < element_count(); row++) {
@@ -592,8 +632,7 @@ inline array<T> array<T>::transpose() const {
       auto shape = shape_;
       std::ranges::reverse(shape);
 
-      auto tmp = clone();
-      tmp.reshape(shape);
+      auto tmp = make_uninit_(shape);
 
       auto it = element_cbegin();
       for (size_t col = 0; col < shape[1]; col++) {
@@ -610,8 +649,7 @@ inline array<T> array<T>::transpose() const {
     auto shape = shape_;
     std::ranges::reverse(shape);
 
-    auto tmp = clone();
-    tmp.reshape(shape);
+    auto tmp = make_uninit_(shape);
 
     auto it = element_cbegin();
     for (size_t z = 0; z < shape[2]; z++) {
@@ -698,160 +736,106 @@ inline array<T> array<T>::operator[](size_t row) const {
 
 //----------------------------------------------------------------------------
 
-template <value_type T>
-class element_iterator {
+template <value_type T, bool IsConst>
+class element_iterator_ {
+  using arr_ptr = std::conditional_t<IsConst, const array<T> *, array<T> *>;
+
  public:
   using difference_type = std::ptrdiff_t;
-  using reference = T &;
   using iterator_concept = std::forward_iterator_tag;
 
-  element_iterator(array<T> *arr, size_t i) : arr_(arr), i_(i) {}
+  element_iterator_(arr_ptr arr, size_t i) : arr_(arr), i_(i) {}
 
-  element_iterator &operator++() {
+  element_iterator_ &operator++() {
     ++i_;
     return *this;
   }
 
-  element_iterator operator++(int) {
+  element_iterator_ operator++(int) {
     auto tmp = *this;
     ++(*this);
     return tmp;
   }
 
-  reference &operator*() { return arr_->at(i_); }
+  decltype(auto) operator*() const { return arr_->at(i_); }
 
-  bool operator==(const element_iterator &) const = default;
+  bool operator==(const element_iterator_ &) const = default;
 
  private:
-  array<T> *arr_ = nullptr;
+  arr_ptr arr_ = nullptr;
   size_t i_ = 0;
 };
 
 template <value_type T>
-class const_element_iterator {
- public:
-  using difference_type = std::ptrdiff_t;
-  using value_type = T;
-  using iterator_concept = std::forward_iterator_tag;
+using element_iterator = element_iterator_<T, false>;
+template <value_type T>
+using const_element_iterator = element_iterator_<T, true>;
 
-  const_element_iterator(const array<T> *arr, size_t i) : arr_(arr), i_(i) {}
-
-  const_element_iterator &operator++() {
-    ++i_;
-    return *this;
+template <value_type T, bool IsConst>
+struct element_range_ {
+  using arr_ptr = std::conditional_t<IsConst, const array<T> *, array<T> *>;
+  element_range_(arr_ptr arr) : arr_(arr) {}
+  auto begin() const { return element_iterator_<T, IsConst>(arr_, 0); }
+  auto end() const {
+    return element_iterator_<T, IsConst>(arr_, arr_->element_count());
   }
-
-  const_element_iterator operator++(int) {
-    auto tmp = *this;
-    ++(*this);
-    return tmp;
-  }
-
-  value_type operator*() const { return arr_->at(i_); }
-
-  bool operator==(const const_element_iterator &) const = default;
-
- private:
-  const array<T> *arr_ = nullptr;
-  size_t i_ = 0;
+  arr_ptr arr_ = nullptr;
 };
 
 template <value_type T>
-struct element_range {
-  element_range(array<T> *arr) : arr_(arr) {}
-  auto begin() { return element_iterator(arr_, 0); }
-  auto end() { return element_iterator(arr_, arr_->element_count()); }
-  array<T> *arr_ = nullptr;
-};
-
+using element_range = element_range_<T, false>;
 template <value_type T>
-struct const_element_range {
-  const_element_range(const array<T> *arr) : arr_(arr) {}
-  auto begin() { return const_element_iterator(arr_, 0); }
-  auto end() { return const_element_iterator(arr_, arr_->element_count()); }
-  auto cbegin() const { return const_element_iterator(arr_, 0); }
-  auto cend() const {
-    return const_element_iterator(arr_, arr_->element_count());
-  }
-  const array<T> *arr_ = nullptr;
-};
+using const_element_range = element_range_<T, true>;
 
 template <value_type T>
 inline auto array<T>::element_begin() {
-  return element_iterator(this, 0);
+  return element_iterator_<T, false>(this, 0);
 }
 
 template <value_type T>
 inline auto array<T>::element_end() {
-  return element_iterator(this, element_count());
+  return element_iterator_<T, false>(this, element_count());
 }
 
 template <value_type T>
 inline auto array<T>::element_cbegin() const {
-  return const_element_iterator(this, 0);
+  return element_iterator_<T, true>(this, 0);
 }
 
 template <value_type T>
 inline auto array<T>::element_cend() const {
-  return const_element_iterator(this, element_count());
+  return element_iterator_<T, true>(this, element_count());
 }
 
 template <value_type T>
 inline auto array<T>::elements() {
-  return element_range(this);
+  return element_range_<T, false>(this);
 }
 
 template <value_type T>
 inline auto array<T>::elements() const {
-  return const_element_range(this);
+  return element_range_<T, true>(this);
 }
 
 //----------------------------------------------------------------------------
 
-template <value_type T>
-class row_iterator {
+template <value_type T, bool IsConst>
+class row_iterator_ {
+  using arr_ptr = std::conditional_t<IsConst, const array<T> *, array<T> *>;
+
  public:
   using difference_type = std::ptrdiff_t;
   using value_type = array<T>;
   using iterator_concept = std::forward_iterator_tag;
 
-  row_iterator(array<T> *arr, size_t i) : arr_(arr), i_(i) {}
+  row_iterator_(arr_ptr arr, size_t i) : arr_(arr), i_(i) {}
 
-  row_iterator &operator++() {
+  row_iterator_ &operator++() {
     ++i_;
     return *this;
   }
 
-  row_iterator operator++(int) {
-    auto tmp = *this;
-    ++(*this);
-    return tmp;
-  }
-
-  value_type operator*() { return (*arr_)[i_]; }
-
-  bool operator==(const row_iterator &) const = default;
-
- private:
-  array<T> *arr_ = nullptr;
-  size_t i_ = 0;
-};
-
-template <value_type T>
-class const_row_iterator {
- public:
-  using difference_type = std::ptrdiff_t;
-  using value_type = array<T>;
-  using iterator_concept = std::forward_iterator_tag;
-
-  const_row_iterator(const array<T> *arr, size_t i) : arr_(arr), i_(i) {}
-
-  const_row_iterator &operator++() {
-    ++i_;
-    return *this;
-  }
-
-  const_row_iterator operator++(int) {
+  row_iterator_ operator++(int) {
     auto tmp = *this;
     ++(*this);
     return tmp;
@@ -859,28 +843,34 @@ class const_row_iterator {
 
   value_type operator*() const { return (*arr_)[i_]; }
 
-  bool operator==(const const_row_iterator &) const = default;
+  bool operator==(const row_iterator_ &) const = default;
 
  private:
-  const array<T> *arr_ = nullptr;
+  arr_ptr arr_ = nullptr;
   size_t i_ = 0;
 };
 
-template <value_type T, size_t N>
-class row_tuple_iterator {
+template <value_type T>
+using row_iterator = row_iterator_<T, false>;
+template <value_type T>
+using const_row_iterator = row_iterator_<T, true>;
+
+template <value_type T, size_t N, bool IsConst>
+class row_tuple_iterator_ {
+  using arr_ptr = std::conditional_t<IsConst, const array<T> *, array<T> *>;
+
  public:
   using difference_type = std::ptrdiff_t;
-  using reference = array<T> &;
   using iterator_concept = std::forward_iterator_tag;
 
-  row_tuple_iterator(array<T> *arr, size_t i) : arr_(arr), i_(i) {}
+  row_tuple_iterator_(arr_ptr arr, size_t i) : arr_(arr), i_(i) {}
 
-  row_tuple_iterator &operator++() {
+  row_tuple_iterator_ &operator++() {
     ++i_;
     return *this;
   }
 
-  row_tuple_iterator operator++(int) {
+  row_tuple_iterator_ operator++(int) {
     auto tmp = *this;
     ++(*this);
     return tmp;
@@ -888,113 +878,86 @@ class row_tuple_iterator {
 
   auto operator*() const { return (*arr_)[i_].template take<N>(); }
 
-  bool operator==(const row_tuple_iterator &) const = default;
+  bool operator==(const row_tuple_iterator_ &) const = default;
 
  private:
-  array<T> *arr_ = nullptr;
+  arr_ptr arr_ = nullptr;
   size_t i_ = 0;
 };
 
 template <value_type T, size_t N>
-class const_row_tuple_iterator {
- public:
-  using difference_type = std::ptrdiff_t;
-  using iterator_concept = std::forward_iterator_tag;
+using row_tuple_iterator = row_tuple_iterator_<T, N, false>;
+template <value_type T, size_t N>
+using const_row_tuple_iterator = row_tuple_iterator_<T, N, true>;
 
-  const_row_tuple_iterator(const array<T> *arr, size_t i) : arr_(arr), i_(i) {}
-
-  const_row_tuple_iterator &operator++() {
-    ++i_;
-    return *this;
+template <value_type T, bool IsConst>
+struct row_range_ {
+  using arr_ptr = std::conditional_t<IsConst, const array<T> *, array<T> *>;
+  row_range_(arr_ptr arr) : arr_(arr) {}
+  auto begin() const { return row_iterator_<T, IsConst>(arr_, 0); }
+  auto end() const {
+    return row_iterator_<T, IsConst>(arr_, arr_->shape()[0]);
   }
-
-  const_row_tuple_iterator operator++(int) {
-    auto tmp = *this;
-    ++(*this);
-    return tmp;
-  }
-
-  auto operator*() const { return (*arr_)(i_).template take<N>(); }
-
-  bool operator==(const const_row_tuple_iterator &) const = default;
-
- private:
-  const array<T> *arr_ = nullptr;
-  size_t i_ = 0;
+  arr_ptr arr_ = nullptr;
 };
 
 template <value_type T>
-struct row_range {
-  row_range(array<T> *arr) : arr_(arr) {}
-  auto begin() { return row_iterator(arr_, 0); }
-  auto end() { return row_iterator(arr_, arr_->shape()[0]); }
-  array<T> *arr_ = nullptr;
-};
-
+using row_range = row_range_<T, false>;
 template <value_type T>
-struct const_row_range {
-  const_row_range(const array<T> *arr) : arr_(arr) {}
-  auto begin() const { return const_row_iterator(arr_, 0); }
-  auto end() const { return const_row_iterator(arr_, arr_->shape()[0]); }
-  auto cbegin() const { return const_row_iterator(arr_, 0); }
-  auto cend() const { return const_row_iterator(arr_, arr_->shape()[0]); }
-  const array<T> *arr_ = nullptr;
-};
+using const_row_range = row_range_<T, true>;
 
-template <value_type T, size_t N>
-struct row_tuple_range {
-  row_tuple_range(array<T> *arr) : arr_(arr) {}
-  auto begin() { return row_tuple_iterator<T, N>(arr_, 0); }
-  auto end() { return row_tuple_iterator<T, N>(arr_, arr_->shape()[0]); }
-  array<T> *arr_ = nullptr;
-};
-
-template <value_type T, size_t N>
-struct const_row_tuple_range {
-  const_row_tuple_range(array<T> *arr) : arr_(arr) {}
-  auto cbegin() const { return const_row_tuple_iterator<T, N>(arr_, 0); }
-  auto cend() const {
-    return const_row_tuple_iterator<T, N>(arr_, arr_->shape()[0]);
+template <value_type T, size_t N, bool IsConst>
+struct row_tuple_range_ {
+  using arr_ptr = std::conditional_t<IsConst, const array<T> *, array<T> *>;
+  row_tuple_range_(arr_ptr arr) : arr_(arr) {}
+  auto begin() const { return row_tuple_iterator_<T, N, IsConst>(arr_, 0); }
+  auto end() const {
+    return row_tuple_iterator_<T, N, IsConst>(arr_, arr_->shape()[0]);
   }
-  const array<T> *arr_ = nullptr;
+  arr_ptr arr_ = nullptr;
 };
+
+template <value_type T, size_t N>
+using row_tuple_range = row_tuple_range_<T, N, false>;
+template <value_type T, size_t N>
+using const_row_tuple_range = row_tuple_range_<T, N, true>;
 
 template <value_type T>
 inline auto array<T>::begin() {
-  return row_iterator(this, 0);
+  return row_iterator_<T, false>(this, 0);
 }
 
 template <value_type T>
 inline auto array<T>::end() {
-  return row_iterator(this, shape_[0]);
+  return row_iterator_<T, false>(this, shape_[0]);
 }
 
 template <value_type T>
 inline auto array<T>::begin() const {
-  return const_row_iterator(this, 0);
+  return row_iterator_<T, true>(this, 0);
 }
 
 template <value_type T>
 inline auto array<T>::end() const {
-  return const_row_iterator(this, shape_[0]);
+  return row_iterator_<T, true>(this, shape_[0]);
 }
 
 template <value_type T>
 inline auto array<T>::cbegin() const {
-  return const_row_iterator(this, 0);
+  return begin();
 }
 template <value_type T>
 inline auto array<T>::cend() const {
-  return const_row_iterator(this, shape_[0]);
+  return end();
 }
 
 template <value_type T>
 template <size_t N>
 inline auto array<T>::rows() {
   if constexpr (N == 0) {
-    return row_range(this);
+    return row_range_<T, false>(this);
   } else {
-    return row_tuple_range<T, N>(this);
+    return row_tuple_range_<T, N, false>(this);
   }
 }
 
@@ -1002,9 +965,9 @@ template <value_type T>
 template <size_t N>
 inline auto array<T>::rows() const {
   if constexpr (N == 0) {
-    return const_row_range(this);
+    return row_range_<T, true>(this);
   } else {
-    return const_row_tuple_range<T, N>(this);
+    return row_tuple_range_<T, N, true>(this);
   }
 }
 
@@ -1012,7 +975,7 @@ inline auto array<T>::rows() const {
 
 template <value_type T>
 inline void array<T>::set(std::input_iterator auto it) {
-  // TODO: parallel operation on GPU
+
   for (size_t i = 0; i < element_count(); i++) {
     at(i) = *it++;
   }
@@ -1042,9 +1005,9 @@ inline void array<T>::ones() {
 
 template <value_type T>
 inline void array<T>::random() {
-  std::ranges::generate(buffer_span(), []() {
-    return static_cast<float>(static_cast<double>(rand()) / RAND_MAX);
-  });
+  thread_local std::mt19937 gen(std::random_device{}());
+  std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+  std::ranges::generate(buffer_span(), [&]() { return dist(gen); });
 }
 
 //----------------------------------------------------------------------------
@@ -1076,26 +1039,22 @@ inline array<T> array<T>::pow(const array &rhs) const {
 
 template <value_type T>
 inline void array<T>::operator+=(const array &rhs) {
-  // TODO: in-place
-  *this = arithmetic_operation_(*this, rhs, ArithmeticOperation::Add);
+  arithmetic_inplace_(rhs, ArithmeticOperation::Add);
 }
 
 template <value_type T>
 inline void array<T>::operator-=(const array &rhs) {
-  // TODO: in-place
-  *this = arithmetic_operation_(*this, rhs, ArithmeticOperation::Sub);
+  arithmetic_inplace_(rhs, ArithmeticOperation::Sub);
 }
 
 template <value_type T>
 inline void array<T>::operator*=(const array &rhs) {
-  // TODO: in-place
-  *this = arithmetic_operation_(*this, rhs, ArithmeticOperation::Mul);
+  arithmetic_inplace_(rhs, ArithmeticOperation::Mul);
 }
 
 template <value_type T>
 inline void array<T>::operator/=(const array &rhs) {
-  // TODO: in-place
-  *this = arithmetic_operation_(*this, rhs, ArithmeticOperation::Div);
+  arithmetic_inplace_(rhs, ArithmeticOperation::Div);
 }
 
 //----------------------------------------------------------------------------
@@ -1103,8 +1062,10 @@ inline void array<T>::operator/=(const array &rhs) {
 template <value_type T>
 inline array<T> array<T>::dot(const array &rhs) const {
   switch (device_) {
-    case Device::GPU:
-      return dot_operation_(rhs, gpu_dot_operation_);
+    case Device::MPS:
+      return dot_operation_(rhs, mps_dot_operation_);
+    case Device::Auto:
+      return dot_operation_(rhs, auto_dot_operation_);
     case Device::CPU:
       return dot_operation_(rhs, cpu_dot_operation_);
   }
@@ -1119,7 +1080,14 @@ inline array<T> array<T>::linear(const array &W, const array &b) const {
 
 template <value_type T>
 inline array<float> array<T>::sigmoid() const {
-  // TODO: parallel operation on GPU
+  if constexpr (std::is_same_v<T, float>) {
+    if (device_ == Device::MPS ||
+        (device_ == Device::Auto && element_count() >= 100'000)) {
+      auto tmp = make_uninit_(shape_);
+      gpu::sigmoid(storage_, tmp.storage_);
+      return tmp;
+    }
+  }
   auto tmp = array<float>(shape_, 0.0);
   for (size_t i = 0; i < element_count(); i++) {
     tmp.at(i) = 1.0 / (1.0 + std::exp(-static_cast<float>(at(i))));
@@ -1361,10 +1329,32 @@ inline std::string array<T>::print_array() const {
 //----------------------------------------------------------------------------
 
 template <value_type T>
+inline array<T> array<T>::make_uninit_(const shape_type &shape) {
+  array a;
+  a.reshape(shape);
+  a.allocate_buffer_();
+  return a;
+}
+
+template <value_type T>
 inline void array<T>::allocate_buffer_() {
+  auto len = element_count();
+  auto bytes = len * sizeof(T);
+
+  storage_ = storage::make(bytes);
   storage_.off = 0;
-  storage_.len = element_count();
-  storage_.buf = metal::default_device().make_buffer(storage_.len * sizeof(T));
+  storage_.len = len;
+}
+
+template <value_type T>
+inline array<T> array<T>::materialize_() const {
+  if (buffer_element_count() == element_count()) {
+    return *this;
+  }
+
+  auto tmp = make_uninit_(shape_);
+  enumerate_position_([&](const auto &pos) { tmp.at(pos) = at(pos); });
+  return tmp;
 }
 
 //----------------------------------------------------------------------------
@@ -1464,6 +1454,37 @@ inline auto array<T>::broadcast_(const array &lhs, const array &rhs, auto cb) {
     return cb(lhs.broadcast(rhs.shape()), rhs);
   } else if (lhs.dimension() > rhs.dimension()) {
     return cb(lhs, rhs.broadcast(lhs.shape()));
+  } else if (lhs.dimension() == rhs.dimension()) {
+    // Same dimension, check broadcast compatibility (each dim must be equal or 1)
+    bool rhs_to_lhs = true, lhs_to_rhs = true;
+    for (size_t i = 0; i < lhs.dimension(); i++) {
+      if (lhs.shape()[i] != rhs.shape()[i]) {
+        if (rhs.shape()[i] != 1) rhs_to_lhs = false;
+        if (lhs.shape()[i] != 1) lhs_to_rhs = false;
+      }
+    }
+    if (rhs_to_lhs) return cb(lhs, rhs.broadcast(lhs.shape()));
+    if (lhs_to_rhs) return cb(lhs.broadcast(rhs.shape()), rhs);
+
+    // Both sides need broadcast (e.g. {3,1} + {1,3} -> {3,3})
+    shape_type target(lhs.dimension());
+    bool compatible = true;
+    for (size_t i = 0; i < lhs.dimension(); i++) {
+      if (lhs.shape()[i] == rhs.shape()[i]) {
+        target[i] = lhs.shape()[i];
+      } else if (lhs.shape()[i] == 1) {
+        target[i] = rhs.shape()[i];
+      } else if (rhs.shape()[i] == 1) {
+        target[i] = lhs.shape()[i];
+      } else {
+        compatible = false;
+        break;
+      }
+    }
+    if (compatible) {
+      return cb(lhs.broadcast(target).materialize_(),
+                rhs.broadcast(target).materialize_());
+    }
   }
   throw std::runtime_error("array: invalid operation.");
 }
@@ -1473,10 +1494,13 @@ template <value_type U>
 inline array<U> array<T>::apply_binary_operation_(const array &rhs,
                                                   auto ope) const {
   return broadcast_(*this, rhs, [ope](const auto &lhs, const auto &rhs) {
-    // TODO: parallel operation on GPU
-    auto tmp = array<U>(lhs.shape(), U{});
-    for (size_t i = 0; i < lhs.element_count(); i++) {
-      tmp.at(i) = ope(lhs.at(i), rhs.at(i));
+  
+    auto n = std::max(lhs.element_count(), rhs.element_count());
+    auto shape = lhs.element_count() >= rhs.element_count() ? lhs.shape() : rhs.shape();
+    auto tmp = array<U>(shape, U{});
+    for (size_t i = 0; i < n; i++) {
+      tmp.at(i) = ope(lhs.at(i % lhs.element_count()),
+                       rhs.at(i % rhs.element_count()));
     }
     return tmp;
   });
@@ -1485,79 +1509,155 @@ inline array<U> array<T>::apply_binary_operation_(const array &rhs,
 //----------------------------------------------------------------------------
 
 template <value_type T>
-inline auto array<T>::gpu_arithmetic_operation_(const array &lhs,
-                                                const array &rhs,
-                                                ArithmeticOperation ope) {
-  return broadcast_(lhs, rhs, [ope](const auto &lhs, const auto &rhs) {
-    auto tmp = array(lhs.shape(), T{});
-    switch (ope) {
-      case ArithmeticOperation::Add:
-        metal::default_device().add<T>(lhs.storage_, rhs.storage_,
-                                       tmp.storage_);
-        break;
-      case ArithmeticOperation::Sub:
-        metal::default_device().sub<T>(lhs.storage_, rhs.storage_,
-                                       tmp.storage_);
-        break;
-      case ArithmeticOperation::Mul:
-        metal::default_device().mul<T>(lhs.storage_, rhs.storage_,
-                                       tmp.storage_);
-        break;
-      case ArithmeticOperation::Div:
-        metal::default_device().div<T>(lhs.storage_, rhs.storage_,
-                                       tmp.storage_);
-        break;
-      case ArithmeticOperation::Pow:
-        metal::default_device().pow<T>(lhs.storage_, rhs.storage_,
-                                       tmp.storage_);
-        break;
-      default:
-        assert(false);
-        break;
-    }
-    return tmp;
-  });
+inline void array<T>::cpu_arithmetic_dispatch_(const storage &lhs,
+                                               const storage &rhs,
+                                               storage &dst,
+                                               ArithmeticOperation ope) {
+  switch (ope) {
+    case ArithmeticOperation::Add: cpu::add<T>(lhs, rhs, dst); break;
+    case ArithmeticOperation::Sub: cpu::sub<T>(lhs, rhs, dst); break;
+    case ArithmeticOperation::Mul: cpu::mul<T>(lhs, rhs, dst); break;
+    case ArithmeticOperation::Div: cpu::div<T>(lhs, rhs, dst); break;
+    case ArithmeticOperation::Pow: cpu::pow<T>(lhs, rhs, dst); break;
+  }
 }
 
 template <value_type T>
 inline auto array<T>::cpu_arithmetic_operation_(const array &lhs,
                                                 const array &rhs,
                                                 ArithmeticOperation ope) {
-  switch (ope) {
-    case ArithmeticOperation::Add:
-      return lhs.apply_binary_operation_(
-          rhs, [](auto lhs, auto rhs) { return lhs + rhs; });
-      break;
-    case ArithmeticOperation::Sub:
-      return lhs.apply_binary_operation_(
-          rhs, [](auto lhs, auto rhs) { return lhs - rhs; });
-      break;
-    case ArithmeticOperation::Mul:
-      return lhs.apply_binary_operation_(
-          rhs, [](auto lhs, auto rhs) { return lhs * rhs; });
-      break;
-    case ArithmeticOperation::Div:
-      return lhs.apply_binary_operation_(
-          rhs, [](auto lhs, auto rhs) { return lhs / rhs; });
-      break;
-    case ArithmeticOperation::Pow:
-      return lhs.apply_binary_operation_(
-          rhs, [](auto lhs, auto rhs) { return std::pow(lhs, rhs); });
-      break;
-    default:
-      assert(false);
-      break;
+  return broadcast_(lhs, rhs, [ope](const auto &lhs, const auto &rhs) {
+    auto tmp = make_uninit_(lhs.shape());
+    cpu_arithmetic_dispatch_(lhs.storage_, rhs.storage_, tmp.storage_, ope);
+    return tmp;
+  });
+}
+
+template <value_type T>
+inline void array<T>::cpu_arithmetic_inplace_(const array &rhs,
+                                                    ArithmeticOperation ope) {
+  if (shape() == rhs.shape() || rhs.element_count() <= element_count()) {
+    cpu_arithmetic_dispatch_(storage_, rhs.storage_, storage_, ope);
+  } else {
+    *this = cpu_arithmetic_operation_(*this, rhs, ope);
   }
 }
 
 template <value_type T>
-inline auto array<T>::arithmetic_operation_(const array &lhs, const array &rhs,
+inline void array<T>::msl_arithmetic_dispatch_(const storage &lhs,
+                                               const storage &rhs,
+                                               storage &dst,
+                                               ArithmeticOperation ope) {
+  switch (ope) {
+    case ArithmeticOperation::Add: msl::add<T>(lhs, rhs, dst); break;
+    case ArithmeticOperation::Sub: msl::sub<T>(lhs, rhs, dst); break;
+    case ArithmeticOperation::Mul: msl::mul<T>(lhs, rhs, dst); break;
+    case ArithmeticOperation::Div: msl::div<T>(lhs, rhs, dst); break;
+    case ArithmeticOperation::Pow: msl::pow<T>(lhs, rhs, dst); break;
+  }
+}
+
+template <value_type T>
+inline auto array<T>::msl_arithmetic_operation_(const array &lhs,
+                                                const array &rhs,
+                                                ArithmeticOperation ope) {
+  return broadcast_(lhs, rhs, [ope](const auto &lhs, const auto &rhs) {
+    auto tmp = make_uninit_(lhs.shape());
+    msl_arithmetic_dispatch_(lhs.storage_, rhs.storage_, tmp.storage_, ope);
+    return tmp;
+  });
+}
+
+template <value_type T>
+inline auto array<T>::arithmetic_operation_(const array &lhs,
+                                            const array &rhs,
                                             ArithmeticOperation ope) {
   switch (device_) {
-    case Device::GPU:
-      return gpu_arithmetic_operation_(lhs, rhs, ope);
     case Device::CPU:
       return cpu_arithmetic_operation_(lhs, rhs, ope);
+    case Device::MPS:
+      return msl_arithmetic_operation_(lhs, rhs, ope);
+    case Device::Auto: {
+      if constexpr (!std::same_as<T, float>) {
+        return cpu_arithmetic_operation_(lhs, rhs, ope);
+      } else {
+        auto &bc = device_cache::instance();
+        auto n = std::max(lhs.element_count(), rhs.element_count());
+        auto b = device_cache::bucket(n);
+        auto k = device_cache::key(static_cast<uint32_t>(ope), b);
+
+        auto dispatch = [&](Device d) {
+          return d == Device::CPU
+                     ? cpu_arithmetic_operation_(lhs, rhs, ope)
+                     : msl_arithmetic_operation_(lhs, rhs, ope);
+        };
+
+        Device device;
+        if (bc.lookup(k, device)) {
+          return dispatch(device);
+        }
+
+        // First time: measure both in alternating order to avoid bias
+        array cpu_result, msl_result;
+
+        auto cpu_time1 = device_cache::time([&] {
+          cpu_result = cpu_arithmetic_operation_(lhs, rhs, ope);
+        });
+        auto msl_time1 = device_cache::time([&] {
+          msl_result = msl_arithmetic_operation_(lhs, rhs, ope);
+        });
+
+        auto msl_time2 = device_cache::time([&] {
+          msl_result = msl_arithmetic_operation_(lhs, rhs, ope);
+        });
+        auto cpu_time2 = device_cache::time([&] {
+          cpu_result = cpu_arithmetic_operation_(lhs, rhs, ope);
+        });
+
+        auto cpu_time = std::min(cpu_time1, cpu_time2);
+        auto msl_time = std::min(msl_time1, msl_time2);
+
+        device = cpu_time <= msl_time ? Device::CPU : Device::MPS;
+        bc.store(k, device);
+        return device == Device::CPU ? cpu_result : msl_result;
+      }
+    }
+  }
+}
+
+template <value_type T>
+inline void array<T>::arithmetic_inplace_(const array &rhs,
+                                          ArithmeticOperation ope) {
+  switch (device_) {
+    case Device::CPU:
+      cpu_arithmetic_inplace_(rhs, ope);
+      break;
+    case Device::MPS:
+      *this = msl_arithmetic_operation_(*this, rhs, ope);
+      break;
+    case Device::Auto: {
+      if constexpr (!std::same_as<T, float>) {
+        cpu_arithmetic_inplace_(rhs, ope);
+      } else {
+        auto &bc = device_cache::instance();
+        auto n = std::max(element_count(), rhs.element_count());
+        auto b = device_cache::bucket(n);
+        auto k = device_cache::key(static_cast<uint32_t>(ope), b);
+
+        Device device;
+        if (bc.lookup(k, device)) {
+          if (device == Device::MPS) {
+            *this = msl_arithmetic_operation_(*this, rhs, ope);
+          } else {
+            cpu_arithmetic_inplace_(rhs, ope);
+          }
+        } else {
+          // No cache entry yet, default to CPU
+          cpu_arithmetic_inplace_(rhs, ope);
+        }
+      }
+      break;
+    }
   }
 }
 
@@ -1566,32 +1666,77 @@ inline auto array<T>::arithmetic_operation_(const array &lhs, const array &rhs,
 template <value_type T>
 inline array<T> array<T>::cpu_dot_operation_(const array &lhs,
                                              const array &rhs) {
-  auto rows = lhs.shape_[0];
-  auto cols = rhs.shape_[1];
-  auto m = lhs.shape_[1];
-  auto tmp = array({rows, cols}, T{});
+  auto tmp = make_uninit_({lhs.shape_[0], rhs.shape_[1]});
 
-  for (size_t row = 0; row < rows; row++) {
-    for (size_t col = 0; col < cols; col++) {
-      T val{};
-      for (size_t i = 0; i < m; i++) {
-        val += lhs[row, i] * rhs[i, col];
-      }
-      tmp[row, col] = val;
-    }
-  }
+  cpu::dot<T>(lhs.storage_, rhs.storage_, tmp.storage_, lhs.shape_[1],
+              lhs.shape_[0], rhs.shape_[1]);
+
   return tmp;
 }
 
 template <value_type T>
-inline array<T> array<T>::gpu_dot_operation_(const array &lhs,
+inline array<T> array<T>::mps_dot_operation_(const array &lhs,
                                              const array &rhs) {
-  auto tmp = array({lhs.shape_[0], rhs.shape_[1]}, T{});
+  if constexpr (std::same_as<T, float>) {
+    auto tmp = make_uninit_({lhs.shape_[0], rhs.shape_[1]});
+    mps::dot_f32(lhs.storage_, rhs.storage_, tmp.storage_,
+                 lhs.shape_[1], lhs.shape_[0], rhs.shape_[1]);
+    return tmp;
+  } else {
+    return cpu_dot_operation_(lhs, rhs);
+  }
+}
 
-  metal::default_device().dot<T>(lhs.storage_, rhs.storage_, tmp.storage_,
-                                 lhs.shape_[1], lhs.shape_[0], rhs.shape_[1]);
+template <value_type T>
+inline array<T> array<T>::auto_dot_operation_(const array &lhs,
+                                              const array &rhs) {
+  if constexpr (!std::same_as<T, float>) {
+    return cpu_dot_operation_(lhs, rhs);
+  } else {
+    constexpr uint32_t dot_op_id = 100;  // distinct from ArithmeticOperation
 
-  return tmp;
+    auto &bc = device_cache::instance();
+    auto work = lhs.shape_[0] * lhs.shape_[1] * rhs.shape_[1];
+    auto b = device_cache::bucket(work);
+    auto k = device_cache::key(dot_op_id, b);
+
+    auto dispatch = [&](Device d) {
+      return d == Device::CPU
+                 ? cpu_dot_operation_(lhs, rhs)
+                 : mps_dot_operation_(lhs, rhs);
+    };
+
+    Device device;
+    if (bc.lookup(k, device)) {
+      return dispatch(device);
+    }
+
+    // First time: measure both in alternating order to avoid bias
+    array cpu_result, mps_result;
+
+    // Round 1: CPU then GPU
+    auto cpu_time1 = device_cache::time([&] {
+      cpu_result = cpu_dot_operation_(lhs, rhs);
+    });
+    auto mps_time1 = device_cache::time([&] {
+      mps_result = mps_dot_operation_(lhs, rhs);
+    });
+
+    // Round 2: GPU then CPU
+    auto mps_time2 = device_cache::time([&] {
+      mps_result = mps_dot_operation_(lhs, rhs);
+    });
+    auto cpu_time2 = device_cache::time([&] {
+      cpu_result = cpu_dot_operation_(lhs, rhs);
+    });
+
+    auto cpu_time = std::min(cpu_time1, cpu_time2);
+    auto mps_time = std::min(mps_time1, mps_time2);
+
+    device = cpu_time <= mps_time ? Device::CPU : Device::MPS;
+    bc.store(k, device);
+    return device == Device::CPU ? cpu_result : mps_result;
+  }
 }
 
 template <value_type T>
@@ -1668,7 +1813,7 @@ inline array<T> operator/(auto lhs, const array<T> &rhs) {
 
 template <value_type T, value_type U>
 inline array<T> where(const array<U> &cond, T x, T y) {
-  // TODO: parallel operation on GPU
+
   auto tmp = array<T>(cond.shape(), T{});
   for (size_t i = 0; i < cond.element_count(); i++) {
     tmp.at(i) = cond.at(i) ? x : y;
@@ -1737,4 +1882,4 @@ inline auto random(const shape_type &shape) {
   return tmp;
 }
 
-};  // namespace mtl
+};  // namespace sil
