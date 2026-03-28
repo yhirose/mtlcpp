@@ -3,7 +3,7 @@ CXXFLAGS = -std=c++23 -O2 -I../include -DACCELERATE_NEW_LAPACK \
            -framework Foundation -framework Metal \
            -framework Accelerate -framework MetalPerformanceShaders
 
-INC = ../include/types.h ../include/objc.h ../include/unified_memory.h ../include/device.h ../include/cpu.h ../include/gpu.h ../include/array.h ../include/sil.h
+INC = ../include/types.h ../include/objc.h ../include/unified_memory.h ../include/device.h ../include/cpu.h ../include/gpu.h ../include/array.h ../include/silarray.h
 
 # External libraries (comment out if not installed)
 EIGEN_FLAGS = -I/opt/homebrew/include -DBENCH_HAS_EIGEN
@@ -20,7 +20,7 @@ TORCH_FLAGS  = -I$(TORCH_PREFIX)/include \
 
 BENCH_FLAGS = $(CXXFLAGS) $(EIGEN_FLAGS) $(MLX_FLAGS) $(TORCH_FLAGS)
 
-TARGETS = bench_sgemm bench_elementwise bench_broadcast bench_chain bench_reduction bench_mlp bench_train
+TARGETS = bench_sgemm bench_elementwise bench_broadcast bench_chain bench_reduction bench_mlp bench_train bench_transformer
 
 all: $(TARGETS)
 
