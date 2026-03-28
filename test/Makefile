@@ -1,7 +1,7 @@
 CXX = clang++
 CXXFLAGS = -std=c++23 -O2 -I../include -DACCELERATE_NEW_LAPACK -framework Foundation -framework Metal -framework Accelerate -framework MetalPerformanceShaders
 
-INC = ../include/types.h ../include/objc.h ../include/unified_memory.h ../include/device.h ../include/cpu.h ../include/gpu.h ../include/array.h ../include/sil.h
+INC = ../include/types.h ../include/objc.h ../include/unified_memory.h ../include/device.h ../include/cpu.h ../include/gpu.h ../include/array.h ../include/silarray.h
 
 TEST_SRC = test_array.cpp test_examples.cpp test_perceptron.cpp test_2lnn.cpp test.cpp
 MNIST_SRC = mnist.cpp

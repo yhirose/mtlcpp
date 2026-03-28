@@ -1,7 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest.h"
 
-#include <sil.h>
+#include <silarray.h>
 #include <cstring>
 
 int main(int argc, char **argv) {

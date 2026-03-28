@@ -3,7 +3,7 @@ Silicon Array
 
 Adaptive Numerical Computing Library for Apple Silicon
 
-* Header-only C++23 library — just `#include <sil.h>`
+* Header-only C++23 library — just `#include <silarray.h>`
 * Automatically selects the optimal backend (CPU or GPU) at runtime based on operation type and data size
 * CPU: Accelerate framework (vDSP, CBLAS)
 * GPU: Metal Shading Language (MSL) for elementwise ops, Metal Performance Shaders (MPS) for matrix multiplication
@@ -21,7 +21,7 @@ Example
 -------
 
 ```cpp
-#include <sil.h>
+#include <silarray.h>
 
 auto a = sil::ones<float>({1000, 1000});
 auto b = sil::ones<float>({1000, 1000});

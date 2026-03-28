@@ -1,4 +1,4 @@
-#include <sil.h>
+#include <silarray.h>
 #include <sys/stat.h>
 
 #include <algorithm>
