@@ -20,18 +20,19 @@ TORCH_FLAGS  = -I$(TORCH_PREFIX)/include \
 
 BENCH_FLAGS = $(CXXFLAGS) $(EIGEN_FLAGS) $(MLX_FLAGS) $(TORCH_FLAGS)
 
-TARGETS = bench_sgemm bench_elementwise bench_broadcast bench_mlp
+TARGETS = bench_sgemm bench_elementwise bench_broadcast bench_chain bench_reduction bench_mlp bench_train
 
 all: $(TARGETS)
 
 bench_%: bench_%.cpp bench_common.h $(INC) Makefile
 	$(CXX) -o $@ $(BENCH_FLAGS) $<
 
-run: $(TARGETS)
-	@for t in $(TARGETS); do echo "\n=== $$t ==="; ./$$t; done
+# Run all or selected benchmarks: make run [BENCH="sgemm mlp"]
+run: $(if $(BENCH),$(addprefix bench_,$(BENCH)),$(TARGETS))
+	@for t in $^; do echo "\n=== $$t ==="; ./$$t; done
 
-csv: $(TARGETS)
-	@for t in $(TARGETS); do ./$$t --csv; done
+csv: $(if $(BENCH),$(addprefix bench_,$(BENCH)),$(TARGETS))
+	@for t in $^; do ./$$t --csv; done
 
 clean:
 	rm -f $(TARGETS)

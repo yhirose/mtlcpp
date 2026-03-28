@@ -1121,6 +1121,10 @@ inline array<float> array<T>::sigmoid() const {
 
 template <value_type T>
 inline T array<T>::sum() const {
+  auto sp = buffer_span();
+  if (sp.size() == element_count()) {
+    return cpu::sum<T>(sp.data(), sp.size());
+  }
   return std::accumulate(element_cbegin(), element_cend(), T{});
 }
 
@@ -1131,10 +1135,16 @@ inline array<T> array<T>::sum(size_t axis) const {
 
   auto tmp = array(s, T{});
 
+  if (dimension() == 2 && axis == 0 &&
+      buffer_element_count() == element_count()) {
+    cpu::sum_axis0<T>(buffer_data(), tmp.buffer_data(),
+                      shape_[0], shape_[1]);
+    return tmp;
+  }
+
   enumerate_position_([&](const auto &pos) {
     auto p = pos;
     p.erase(p.begin() + axis);
-
     tmp.at(p) += at(pos);
   });
 

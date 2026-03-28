@@ -5,6 +5,7 @@
 
 #include <Accelerate/Accelerate.h>
 #include <cmath>
+#include <numeric>
 
 namespace sil {
 
@@ -34,6 +35,12 @@ class cpu {
   static void dot(const storage &A, const storage &B,
                   storage &OUT, uint32_t A_cols, uint32_t OUT_rows,
                   uint32_t OUT_cols);
+
+  template <value_type T>
+  static T sum(const T *data, size_t n);
+
+  template <value_type T>
+  static void sum_axis0(const T *src, T *dst, size_t rows, size_t cols);
 
  private:
   template <value_type T>
@@ -235,6 +242,30 @@ inline void cpu::dot(const storage &A, const storage &B,
         out[i * OUT_cols + j] += a_ik * b[k * OUT_cols + j];
       }
     }
+  }
+}
+
+template <value_type T>
+inline T cpu::sum(const T *data, size_t n) {
+  if constexpr (std::is_same_v<T, float>) {
+    float result;
+    vDSP_sve(data, 1, &result, n);
+    return result;
+  }
+  return std::accumulate(data, data + n, T{});
+}
+
+template <value_type T>
+inline void cpu::sum_axis0(const T *src, T *dst, size_t rows, size_t cols) {
+  if constexpr (std::is_same_v<T, float>) {
+    std::memset(dst, 0, cols * sizeof(float));
+    for (size_t r = 0; r < rows; r++)
+      vDSP_vadd(dst, 1, src + r * cols, 1, dst, 1, cols);
+  } else {
+    std::memset(dst, 0, cols * sizeof(T));
+    for (size_t r = 0; r < rows; r++)
+      for (size_t c = 0; c < cols; c++)
+        dst[c] += src[r * cols + c];
   }
 }
 
