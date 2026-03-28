@@ -558,6 +558,7 @@ TEST_CASE("msl: add float") {
   out_storage.len = 4;
 
   msl::add<float>(a_storage, b_storage, out_storage);
+  synchronize();
 
   auto result = array<float>({4}, static_cast<float*>(out_storage.data));
   CHECK(array_equal(result, {11.0f, 22.0f, 33.0f, 44.0f}));
@@ -579,6 +580,7 @@ TEST_CASE("msl: add int") {
   out_storage.len = 4;
 
   msl::add<int>(a_storage, b_storage, out_storage);
+  synchronize();
 
   auto result = array<int>({4}, static_cast<int*>(out_storage.data));
   CHECK(array_equal(result, {11, 22, 33, 44}));
@@ -599,6 +601,7 @@ TEST_CASE("msl: add float broadcast") {
   out_storage.len = 4;
 
   msl::add<float>(a_storage, b_storage, out_storage);
+  synchronize();
 
   auto result = array<float>({4}, static_cast<float*>(out_storage.data));
   CHECK(array_equal(result, {11.0f, 12.0f, 13.0f, 14.0f}));

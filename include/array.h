@@ -286,6 +286,12 @@ class array {
   static array auto_dot_operation_(const array &lhs, const array &rhs);
   template <typename U>
   array dot_operation_(const array &rhs, U fn) const;
+
+  template <typename CpuFn, typename GpuFn>
+  static array auto_dispatch_(uint32_t op, size_t work, CpuFn cpu_fn,
+                               GpuFn gpu_fn, bool chain = false);
+
+  static array auto_dot_chain_(const array &lhs, const array &rhs);
 };
 
 //----------------------------------------------------------------------------
@@ -508,6 +514,7 @@ inline size_t array<T>::buffer_bytes() const {
 
 template <value_type T>
 inline auto *array<T>::buffer_data(this auto &&self) {
+  if (gpu_pending_) gpu_context::instance().flush();
   constexpr bool is_const =
       std::is_const_v<std::remove_reference_t<decltype(self)>>;
   using ptr_type = std::conditional_t<is_const, const T *, T *>;
@@ -1073,6 +1080,8 @@ inline array<T> array<T>::dot(const array &rhs) const {
 
 template <value_type T>
 inline array<T> array<T>::linear(const array &W, const array &b) const {
+  if (device_ == Device::Auto)
+    return dot_operation_(W, auto_dot_chain_) + b;
   return dot(W) + b;
 }
 
@@ -1080,19 +1089,32 @@ inline array<T> array<T>::linear(const array &W, const array &b) const {
 
 template <value_type T>
 inline array<float> array<T>::sigmoid() const {
-  if constexpr (std::is_same_v<T, float>) {
-    if (device_ == Device::MPS ||
-        (device_ == Device::Auto && element_count() >= 100'000)) {
-      auto tmp = make_uninit_(shape_);
-      gpu::sigmoid(storage_, tmp.storage_);
-      return tmp;
+  auto cpu_sigmoid = [&] {
+    auto tmp = array<float>(shape_, 0.0);
+    for (size_t i = 0; i < element_count(); i++) {
+      tmp.at(i) = 1.0 / (1.0 + std::exp(-static_cast<float>(at(i))));
+    }
+    return tmp;
+  };
+  auto gpu_sigmoid = [&] {
+    auto tmp = array<float>::make_uninit_(shape_);
+    gpu::sigmoid(storage_, tmp.storage_);
+    return tmp;
+  };
+
+  if constexpr (!std::is_same_v<T, float>) {
+    return cpu_sigmoid();
+  } else {
+    switch (device_) {
+      case Device::CPU: return cpu_sigmoid();
+      case Device::MPS: return gpu_sigmoid();
+      case Device::Auto: {
+        constexpr uint32_t sigmoid_op_id = 101;
+        return auto_dispatch_(sigmoid_op_id, element_count(),
+                              cpu_sigmoid, gpu_sigmoid);
+      }
     }
   }
-  auto tmp = array<float>(shape_, 0.0);
-  for (size_t i = 0; i < element_count(); i++) {
-    tmp.at(i) = 1.0 / (1.0 + std::exp(-static_cast<float>(at(i))));
-  }
-  return tmp;
 }
 
 //----------------------------------------------------------------------------
@@ -1581,45 +1603,11 @@ inline auto array<T>::arithmetic_operation_(const array &lhs,
       if constexpr (!std::same_as<T, float>) {
         return cpu_arithmetic_operation_(lhs, rhs, ope);
       } else {
-        auto &bc = device_cache::instance();
-        auto n = std::max(lhs.element_count(), rhs.element_count());
-        auto b = device_cache::bucket(n);
-        auto k = device_cache::key(static_cast<uint32_t>(ope), b);
-
-        auto dispatch = [&](Device d) {
-          return d == Device::CPU
-                     ? cpu_arithmetic_operation_(lhs, rhs, ope)
-                     : msl_arithmetic_operation_(lhs, rhs, ope);
-        };
-
-        Device device;
-        if (bc.lookup(k, device)) {
-          return dispatch(device);
-        }
-
-        // First time: measure both in alternating order to avoid bias
-        array cpu_result, msl_result;
-
-        auto cpu_time1 = device_cache::time([&] {
-          cpu_result = cpu_arithmetic_operation_(lhs, rhs, ope);
-        });
-        auto msl_time1 = device_cache::time([&] {
-          msl_result = msl_arithmetic_operation_(lhs, rhs, ope);
-        });
-
-        auto msl_time2 = device_cache::time([&] {
-          msl_result = msl_arithmetic_operation_(lhs, rhs, ope);
-        });
-        auto cpu_time2 = device_cache::time([&] {
-          cpu_result = cpu_arithmetic_operation_(lhs, rhs, ope);
-        });
-
-        auto cpu_time = std::min(cpu_time1, cpu_time2);
-        auto msl_time = std::min(msl_time1, msl_time2);
-
-        device = cpu_time <= msl_time ? Device::CPU : Device::MPS;
-        bc.store(k, device);
-        return device == Device::CPU ? cpu_result : msl_result;
+        return auto_dispatch_(
+            static_cast<uint32_t>(ope),
+            std::max(lhs.element_count(), rhs.element_count()),
+            [&] { return cpu_arithmetic_operation_(lhs, rhs, ope); },
+            [&] { return msl_arithmetic_operation_(lhs, rhs, ope); });
       }
     }
   }
@@ -1639,22 +1627,11 @@ inline void array<T>::arithmetic_inplace_(const array &rhs,
       if constexpr (!std::same_as<T, float>) {
         cpu_arithmetic_inplace_(rhs, ope);
       } else {
-        auto &bc = device_cache::instance();
-        auto n = std::max(element_count(), rhs.element_count());
-        auto b = device_cache::bucket(n);
-        auto k = device_cache::key(static_cast<uint32_t>(ope), b);
-
-        Device device;
-        if (bc.lookup(k, device)) {
-          if (device == Device::MPS) {
-            *this = msl_arithmetic_operation_(*this, rhs, ope);
-          } else {
-            cpu_arithmetic_inplace_(rhs, ope);
-          }
-        } else {
-          // No cache entry yet, default to CPU
-          cpu_arithmetic_inplace_(rhs, ope);
-        }
+        *this = auto_dispatch_(
+            static_cast<uint32_t>(ope),
+            std::max(element_count(), rhs.element_count()),
+            [&] { return cpu_arithmetic_operation_(*this, rhs, ope); },
+            [&] { return msl_arithmetic_operation_(*this, rhs, ope); });
       }
       break;
     }
@@ -1693,49 +1670,69 @@ inline array<T> array<T>::auto_dot_operation_(const array &lhs,
   if constexpr (!std::same_as<T, float>) {
     return cpu_dot_operation_(lhs, rhs);
   } else {
-    constexpr uint32_t dot_op_id = 100;  // distinct from ArithmeticOperation
-
-    auto &bc = device_cache::instance();
+    constexpr uint32_t dot_op_id = 100;
     auto work = lhs.shape_[0] * lhs.shape_[1] * rhs.shape_[1];
-    auto b = device_cache::bucket(work);
-    auto k = device_cache::key(dot_op_id, b);
+    return auto_dispatch_(
+        dot_op_id, work,
+        [&] { return cpu_dot_operation_(lhs, rhs); },
+        [&] { return mps_dot_operation_(lhs, rhs); });
+  }
+}
 
-    auto dispatch = [&](Device d) {
-      return d == Device::CPU
-                 ? cpu_dot_operation_(lhs, rhs)
-                 : mps_dot_operation_(lhs, rhs);
-    };
+template <value_type T>
+template <typename CpuFn, typename GpuFn>
+inline array<T> array<T>::auto_dispatch_(uint32_t op, size_t work,
+                                          CpuFn cpu_fn, GpuFn gpu_fn,
+                                          bool chain) {
+  if (gpu_pending_) return gpu_fn();
 
-    Device device;
-    if (bc.lookup(k, device)) {
-      return dispatch(device);
-    }
+  auto &bc = device_cache::instance();
+  auto b = device_cache::bucket(work);
+  auto k = device_cache::key(op, b);
 
-    // First time: measure both in alternating order to avoid bias
-    array cpu_result, mps_result;
+  Device device;
+  if (bc.lookup(k, device)) {
+    return device == Device::CPU ? cpu_fn() : gpu_fn();
+  }
 
-    // Round 1: CPU then GPU
-    auto cpu_time1 = device_cache::time([&] {
-      cpu_result = cpu_dot_operation_(lhs, rhs);
-    });
-    auto mps_time1 = device_cache::time([&] {
-      mps_result = mps_dot_operation_(lhs, rhs);
-    });
+  // Benchmark both backends.
+  // When chain=true, measure GPU encode time only (sync cost is amortized
+  // across the chain). Otherwise measure GPU with sync (standalone cost).
+  array cpu_result, gpu_result;
 
-    // Round 2: GPU then CPU
-    auto mps_time2 = device_cache::time([&] {
-      mps_result = mps_dot_operation_(lhs, rhs);
-    });
-    auto cpu_time2 = device_cache::time([&] {
-      cpu_result = cpu_dot_operation_(lhs, rhs);
-    });
+  auto cpu_time1 = device_cache::time([&] { cpu_result = cpu_fn(); });
+  auto gpu_time1 = device_cache::time([&] { gpu_result = gpu_fn(); synchronize(); });
 
-    auto cpu_time = std::min(cpu_time1, cpu_time2);
-    auto mps_time = std::min(mps_time1, mps_time2);
+  auto gpu_time2 = device_cache::time([&] { gpu_result = gpu_fn(); synchronize(); });
+  auto cpu_time2 = device_cache::time([&] { cpu_result = cpu_fn(); });
 
-    device = cpu_time <= mps_time ? Device::CPU : Device::MPS;
-    bc.store(k, device);
-    return device == Device::CPU ? cpu_result : mps_result;
+  auto cpu_time = std::min(cpu_time1, cpu_time2);
+  auto gpu_time = std::min(gpu_time1, gpu_time2);
+
+  if (chain) {
+    // In a chain, sync cost is amortized. Estimate encode-only cost by
+    // measuring a bare sync and subtracting it from the GPU time.
+    auto sync_cost = device_cache::time([&] { synchronize(); });
+    gpu_time = std::max(gpu_time - sync_cost, 0.0);
+  }
+
+  device = cpu_time <= gpu_time ? Device::CPU : Device::MPS;
+  bc.store(k, device);
+  return device == Device::CPU ? cpu_result : gpu_result;
+}
+
+template <value_type T>
+inline array<T> array<T>::auto_dot_chain_(const array &lhs, const array &rhs) {
+  if constexpr (!std::same_as<T, float>) {
+    return cpu_dot_operation_(lhs, rhs);
+  } else {
+    if (gpu_pending_) return mps_dot_operation_(lhs, rhs);
+    constexpr uint32_t dot_op = 100;
+    auto work = lhs.shape_[0] * lhs.shape_[1] * rhs.shape_[1];
+    return auto_dispatch_(dot_op, work,
+        [&] { return cpu_dot_operation_(lhs, rhs); },
+        [&] { return mps_dot_operation_(lhs, rhs); },
+        true);
   }
 }
 

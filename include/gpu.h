@@ -29,8 +29,39 @@ class gpu_context {
 
   const pipeline& pso(size_t index) { return psos_[index]; }
 
+  void* command_buffer() {
+    if (!cb_) {
+      cb_ = objc::send(queue, "commandBuffer");
+      gpu_pending_ = true;
+    }
+    return cb_;
+  }
+
+  void* compute_encoder() {
+    if (!encoder_) encoder_ = objc::send(command_buffer(), "computeCommandEncoder");
+    return encoder_;
+  }
+
+  void end_encoder() {
+    if (encoder_) {
+      objc::send(encoder_, "endEncoding");
+      encoder_ = nullptr;
+    }
+  }
+
+  void flush() {
+    if (!cb_) return;
+    end_encoder();
+    objc::send(cb_, "commit");
+    objc::send(cb_, "waitUntilCompleted");
+    cb_ = nullptr;
+    gpu_pending_ = false;
+  }
+
  private:
   std::vector<pipeline> psos_;
+  void* cb_ = nullptr;
+  void* encoder_ = nullptr;
 
   gpu_context() {
     auto* device = buffer_pool::instance().device;
@@ -148,6 +179,18 @@ void arithmetic_operation_f4_(
     float b_val = B_arr[0];
     *reinterpret_cast<device float4*>(OUT_arr + base) =
         float4(op(a4.x, b_val), op(a4.y, b_val), op(a4.z, b_val), op(a4.w, b_val));
+  } else if (base + 4 <= OUT_length && A_length == OUT_length && B_length > 1) {
+    auto a4 = *reinterpret_cast<device const float4*>(A_arr + base);
+    uint b_base = base % B_length;
+    float4 b4;
+    if (b_base + 4 <= B_length) {
+      b4 = *reinterpret_cast<device const float4*>(B_arr + b_base);
+    } else {
+      b4 = float4(B_arr[b_base], B_arr[(b_base+1) % B_length],
+                   B_arr[(b_base+2) % B_length], B_arr[(b_base+3) % B_length]);
+    }
+    *reinterpret_cast<device float4*>(OUT_arr + base) =
+        float4(op(a4.x, b4.x), op(a4.y, b4.y), op(a4.z, b4.z), op(a4.w, b4.w));
   } else {
     for (uint i = 0; i < 4 && base + i < OUT_length; i++) {
       OUT_arr[base + i] = op(A_arr[(base + i) % A_length], B_arr[(base + i) % B_length]);
@@ -268,8 +311,7 @@ class gpu {
 
     auto len = static_cast<uint32_t>(OUT.len);
 
-    auto cb = objc::send(ctx.queue, "commandBuffer");
-    auto enc = objc::send(cb, "computeCommandEncoder");
+    auto enc = ctx.compute_encoder();
 
     objc::send(enc, "setComputePipelineState:", pl.pso);
     objc::send(enc, "setBuffer:offset:atIndex:",
@@ -285,10 +327,6 @@ class gpu {
     objc::send_dispatch(enc,
                         {grid_len, 1, 1},
                         {pl.thread_width, h, 1});
-
-    objc::send(enc, "endEncoding");
-    objc::send(cb, "commit");
-    objc::send(cb, "waitUntilCompleted");
   }
 
   // Matrix multiplication via MPS
@@ -325,10 +363,9 @@ class gpu {
         pool.device, false, false,
         OUT_rows, OUT_cols, A_cols, 1.0, 0.0);
 
-    auto cb = objc::send(ctx.queue, "commandBuffer");
+    ctx.end_encoder();
+    auto cb = ctx.command_buffer();
     objc::send_mps_encode(matMul, cb, matA, matB, matC);
-    objc::send(cb, "commit");
-    objc::send(cb, "waitUntilCompleted");
 
     objc::release(matMul);
     objc::release(matA);
@@ -348,8 +385,7 @@ class gpu {
     uint32_t dtype = std::is_same_v<T, float> ? 0u : 1u;
     auto out_len = static_cast<uint32_t>(OUT.len);
 
-    auto cb = objc::send(ctx.queue, "commandBuffer");
-    auto enc = objc::send(cb, "computeCommandEncoder");
+    auto enc = ctx.compute_encoder();
 
     objc::send(enc, "setComputePipelineState:", pl.pso);
     objc::send(enc, "setBuffer:offset:atIndex:",
@@ -373,15 +409,15 @@ class gpu {
     objc::send_dispatch(enc,
                         {grid_len, 1, 1},
                         {pl.thread_width, h, 1});
-
-    objc::send(enc, "endEncoding");
-    objc::send(cb, "commit");
-    objc::send(cb, "waitUntilCompleted");
   }
 };
 
 // Backward compatibility
 using msl = gpu;
 using mps = gpu;
+
+inline void synchronize() {
+  gpu_context::instance().flush();
+}
 
 };  // namespace sil

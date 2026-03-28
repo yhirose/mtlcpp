@@ -27,7 +27,7 @@ void bench_op(std::vector<BenchGroup>& groups, bool csv, const char* op_name,
       auto b = sil::ones<float>({n});
       auto c = sil::array<float>();
       entries.push_back(
-          {"sil", measure(iters, [&] { c = sil_fn(a, b); })});
+          {"sil", measure(iters, [&] { c = sil_fn(a, b); sil::synchronize(); })});
     }
 
 #ifdef BENCH_HAS_EIGEN

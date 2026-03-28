@@ -37,6 +37,7 @@ void bench_mlp(std::vector<BenchGroup>& groups, bool csv) {
                             auto h1 = x.linear(W1, b1).sigmoid();
                             auto h2 = h1.linear(W2, b2).sigmoid();
                             auto out = h2.linear(W3, b3);
+                            sil::synchronize();
                           })});
     }
 

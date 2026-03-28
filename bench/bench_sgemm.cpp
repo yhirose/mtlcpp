@@ -26,7 +26,7 @@ void bench_sgemm(std::vector<BenchGroup>& groups, bool csv) {
       auto a = sil::ones<float>({m, m});
       auto b = sil::ones<float>({m, m});
       auto c = sil::array<float>();
-      entries.push_back({"sil", measure(iters, [&] { c = a.dot(b); })});
+      entries.push_back({"sil", measure(iters, [&] { c = a.dot(b); sil::synchronize(); })});
     }
 
 #ifdef BENCH_HAS_EIGEN

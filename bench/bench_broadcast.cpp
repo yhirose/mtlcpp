@@ -32,7 +32,7 @@ void bench_broadcast(std::vector<BenchGroup>& groups, bool csv) {
       auto b = sil::ones<float>({cols});
       auto c = sil::array<float>();
       entries.push_back(
-          {"sil", measure(iters, [&] { c = a + b; })});
+          {"sil", measure(iters, [&] { c = a + b; sil::synchronize(); })});
     }
 
 #ifdef BENCH_HAS_EIGEN
